@@ -43,6 +43,18 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 
 ---
 
+### Cara Memperbarui (Update)
+Jika terdapat pembaruan kode di repositori GitHub, Anda dapat memperbarui aplikasi Anda dengan cara:
+- **Jika menggunakan metode Curl:** Jalankan kembali perintah instalasi Curl di Metode 1.
+- **Jika menggunakan metode Pip:** Jalankan perintah berikut di terminal Anda:
+  ```bash
+  pip install --upgrade git+https://github.com/mikumimiestu/lyra-ai-cli.git
+  ```
+
+*(Pembaruan ini tidak akan menghapus API Key yang sudah Anda simpan).*
+
+---
+
 ### Cara Menggunakan
 
 Setelah instalasi selesai, jalankan perintah ini di terminal Anda:
@@ -56,7 +68,7 @@ Cobalah mengetikkan perintah-perintah ini untuk melihat cara kerja agen AI:
 1.  **Melihat Daftar File:**
     > *“coba list folder saat ini”*
 2.  **Membaca File:**
-    > *“tolong baca isi file styling.py”*
+    > *?tolong baca isi file styling.py”*
 3.  **Membuat File Baru & Menjalankannya:**
     > *“tolong buat file baru namanya hitung.py berisi fungsi fibonacci dan jalankan filenya”*
 
@@ -98,6 +110,18 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
    ```bash
    bash install.sh
    ```
+
+---
+
+### How to Update
+If there are updates in the GitHub repository, you can update your installed CLI by:
+- **If installed via Curl:** Re-run the Curl installation command in Method 1.
+- **If installed via Pip:** Run the following command in your terminal:
+  ```bash
+  pip install --upgrade git+https://github.com/mikumimiestu/lyra-ai-cli.git
+  ```
+
+*(Updating will not delete or reset your saved API Key).*
 
 ---
 
