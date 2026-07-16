@@ -104,107 +104,103 @@ def get_terminal_width():
     except Exception:
         return 80
 
-def pad_to(text, width, fill=" "):
-    """Pad plain string to a given width (tanpa ANSI codes)."""
-    visible_len = len(re.sub(r'\033\[[0-9;]*m', '', text))
-    return text + fill * max(0, width - visible_len)
+def strip_ansi(text):
+    """Menghapus kode ANSI dari string untuk menghitung panjang karakter yang tampil."""
+    return re.sub(r'\033\[[0-9;]*m', '', text)
 
 def render_welcome_panel(model_name, api_key_masked):
     """Render panel welcome ala Claude CLI."""
-    w = min(get_terminal_width() - 2, 90)
-    half = (w - 2) // 2
-
-    B  = COLOR_BORDER
-    T  = COLOR_TITLE
-    D  = COLOR_DIM
-    A  = COLOR_ACCENT
-    Y  = YELLOW
-    R  = RESET
-
-    sep_h = "─" * (w - 2)
-
-    def box_line(left_content="", right_content="", divider=True):
-        """Render satu baris dalam panel 2-kolom."""
-        mid_char = "│" if divider else " "
-        l = pad_to(left_content,  half)
-        r = pad_to(right_content, w - half - 3)
-        return f"  {B}│{R} {l} {B}{mid_char}{R} {r} {B}│{R}"
-
+    w = min(get_terminal_width() - 4, 95)
+    B, T, D, A, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_DIM, COLOR_ACCENT, YELLOW, RESET
+    
+    half_left = w // 2
+    half_right = w - half_left - 1
+    
     lines = []
-    lines.append(f"  {B}╭{sep_h}╮{R}")
-
-    # Row: Welcome + Tips header
+    lines.append(f"  {B}╭{'─' * w}╮{R}")
+    
+    def dual_col(left_text, right_text):
+        l_vis = len(strip_ansi(left_text))
+        r_vis = len(strip_ansi(right_text))
+        
+        if l_vis > half_left - 2:
+            left_text = left_text[:half_left - 5] + "..."
+            l_vis = len(strip_ansi(left_text))
+        if r_vis > half_right - 2:
+            right_text = right_text[:half_right - 5] + "..."
+            r_vis = len(strip_ansi(right_text))
+            
+        pad_l = max(0, half_left - l_vis - 1)
+        pad_r = max(0, half_right - r_vis - 1)
+        
+        content = f" {left_text}{' ' * pad_l}{B}│{R} {right_text}{' ' * pad_r}"
+        return f"  {B}│{R}{content}{B}│{R}"
+    
     welcome_text  = f"{BOLD}{T}Welcome back!{R}"
     tips_text     = f"{A}{BOLD}Tips untuk memulai{R}"
-    lines.append(box_line(welcome_text, tips_text))
-
-    lines.append(f"  {B}│{R} {' ' * (half)} {B}│{R} {' ' * (w - half - 3)} {B}│{R}")
-
-    # Row: Model info + Tip 1
+    lines.append(dual_col(welcome_text, tips_text))
+    lines.append(f"  {B}│{' ' * half_left}│{' ' * half_right}│{R}")
+    
     model_text    = f"{D}Model  : {R}{BOLD}{COLOR_LYRA}{model_name}{R}"
     tip1_text     = f"{D}Ketik {R}{BOLD}/model{R}{D} untuk ganti model AI{R}"
-    lines.append(box_line(model_text, tip1_text))
-
-    # Row: API key masked + Tip 2
+    lines.append(dual_col(model_text, tip1_text))
+    
+    if len(api_key_masked) > 30:
+        api_key_masked = api_key_masked[:8] + "..." + api_key_masked[-4:]
     key_text      = f"{D}API Key: {R}{DIM}{api_key_masked}{R}"
     tip2_text     = f"{D}Ketik {R}{BOLD}/project{R}{D} untuk buat project baru{R}"
-    lines.append(box_line(key_text, tip2_text))
-
-    # Row: Tip 3
-    blank_l       = ""
+    lines.append(dual_col(key_text, tip2_text))
+    
     tip3_text     = f"{D}Ketik {R}{BOLD}/help{R}{D} untuk lihat semua perintah{R}"
-    lines.append(box_line(blank_l, tip3_text))
-
-    lines.append(f"  {B}╰{sep_h}╯{R}")
+    lines.append(dual_col("", tip3_text))
+    
+    lines.append(f"  {B}╰{'─' * w}╯{R}")
     return "\n".join(lines)
 
 def render_model_selector(current_idx):
     """Render model selector interaktif ala Claude CLI."""
-    w = min(get_terminal_width() - 2, 80)
+    w = min(get_terminal_width() - 4, 80)
+    B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
 
-    B  = COLOR_BORDER
-    T  = COLOR_TITLE
-    A  = COLOR_ACCENT
-    D  = COLOR_DIM
-    Y  = YELLOW
-    R  = RESET
+    def print_line(content):
+        v_len = len(strip_ansi(content))
+        pad = max(0, w - v_len)
+        print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
 
-    sep_h = "─" * (w - 2)
-
-    print(f"\n  {B}╭{sep_h}╮{R}")
-    print(f"  {B}│{R}  {BOLD}{A}Pilih Model{R}{' ' * (w - 15)}{B}│{R}")
-    print(f"  {B}│{R}  {D}Ganti model AI untuk sesi ini dan sesi berikutnya.{R}{' ' * max(0, w - 55)}{B}│{R}")
-    print(f"  {B}│{R}{' ' * (w - 2)}{B}│{R}")
-
+    print(f"\n  {B}╭{'─' * w}╮{R}")
+    print_line(f"  {BOLD}{A}Pilih Model{R}")
+    print_line(f"  {D}Ganti model AI untuk sesi ini dan sesi berikutnya.{R}")
+    print_line("")
+    
     for i, m in enumerate(MODELS):
         selected = (i == current_idx)
-        cursor   = f"{BOLD}{A}❯{R}" if selected else "  "
+        cursor   = f"{BOLD}{A}❯{R}" if selected else " "
         num_col  = f"{BOLD}{T}{i+1}.{R}" if not selected else f"{BOLD}{A}{i+1}.{R}"
         tag_col  = f"{A}{m['tag']}{R}" if selected else f"{D}{m['tag']}{R}"
         name_col = f"{BOLD}{COLOR_LYRA}{m['name']}{R}" if selected else f"{BOLD}{T}{m['name']}{R}"
         desc_col = f"{D}{m['desc']}{R}"
         check    = f" {GREEN}✓{R}" if selected else "  "
-
-        row = f"  {B}│{R} {cursor} {num_col} {name_col}{check}   {tag_col}   {desc_col}"
-        visible = len(re.sub(r'\033\[[0-9;]*m', '', row))
-        padding = max(0, w - visible + 2)
-        print(row + " " * padding + f"{B}│{R}")
-
-    print(f"  {B}│{R}{' ' * (w - 2)}{B}│{R}")
-    print(f"  {B}│{R}  {D}Masukkan nomor (1-{len(MODELS)}) lalu Enter • Tekan Enter untuk tetap pakai model sekarang{R}  {B}│{R}")
-    print(f"  {B}╰{sep_h}╯{R}")
+        
+        print_line(f" {cursor} {num_col} {name_col}{check}   {tag_col}   {desc_col}")
+        
+    print_line("")
+    print_line(f"  {D}Masukkan nomor (1-{len(MODELS)}) lalu Enter • Tekan Enter untuk batal{R}")
+    print(f"  {B}╰{'─' * w}╯{R}")
 
 def render_help():
     """Tampilkan panel bantuan."""
-    w = min(get_terminal_width() - 2, 80)
-    B  = COLOR_BORDER
-    T  = COLOR_TITLE
-    A  = COLOR_ACCENT
-    D  = COLOR_DIM
-    Y  = YELLOW
-    R  = RESET
-    sep_h = "─" * (w - 2)
+    w = min(get_terminal_width() - 4, 80)
+    B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
+    
+    def print_line(content):
+        v_len = len(strip_ansi(content))
+        pad = max(0, w - v_len)
+        print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
 
+    print(f"\n  {B}╭{'─' * w}╮{R}")
+    print_line(f"  {BOLD}{A}Perintah Lyra CLI{R}")
+    print_line("")
+    
     cmds = [
         ("/model",          "Buka pilihan model AI"),
         ("/project",        "Buat project baru (React, Laravel, PHP, dll.)"),
@@ -217,17 +213,12 @@ def render_help():
         ("/help",           "Tampilkan bantuan ini"),
         ("exit / quit",     "Keluar dari Lyra CLI"),
     ]
-
-    print(f"\n  {B}╭{sep_h}╮{R}")
-    print(f"  {B}│{R}  {BOLD}{A}Perintah Lyra CLI{R}{' ' * (w - 21)}{B}│{R}")
-    print(f"  {B}│{R}{' ' * (w - 2)}{B}│{R}")
+    
     for cmd, desc in cmds:
-        row = f"  {B}│{R}   {BOLD}{Y}{cmd:<18}{R}  {D}{desc}{R}"
-        visible = len(re.sub(r'\033\[[0-9;]*m', '', row))
-        padding = max(0, w - visible + 2)
-        print(row + " " * padding + f"{B}│{R}")
-    print(f"  {B}│{R}{' ' * (w - 2)}{B}│{R}")
-    print(f"  {B}╰{sep_h}╯{R}\n")
+        print_line(f"   {BOLD}{Y}{cmd:<18}{R}  {D}{desc}{R}")
+        
+    print_line("")
+    print(f"  {B}╰{'─' * w}╯{R}\n")
 
 def print_lyra_message(text):
     """Print pesan Lyra dengan prefix dan styling yang konsisten."""
