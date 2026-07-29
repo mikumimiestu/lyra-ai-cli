@@ -10,6 +10,10 @@ from styling import (
     RESET, BOLD, DIM, ITALIC, WHITE, GREEN, RED, YELLOW, CYAN,
     COLOR_USER, COLOR_LYRA, COLOR_BORDER, COLOR_DIM, COLOR_TITLE,
     COLOR_ACCENT, print_logo, rgb_to_ansi, hex_to_rgb,
+    get_terminal_width, strip_ansi, str_width, format_markdown_line,
+    render_ai_bubble_top, render_ai_bubble_bottom,
+    format_markdown_line_bubble, render_thinking_top,
+    render_thinking_bottom, format_thinking_line_bubble
 )
 from spinner import Spinner
 from tools import (
@@ -46,6 +50,12 @@ MODELS = [
         "name": "Nexara 4.5",
         "desc": "Model generasi berikutnya dari Nexara",
         "tag":  "🚀 Next-Gen",
+    },
+    {
+        "id":   "ivy-3",
+        "name": "Ivy 3",
+        "desc": "Model penalaran mendalam & analitis",
+        "tag":  "🧠 Thinking",
     },
 ]
 
@@ -98,16 +108,6 @@ def extract_tool_call(content):
     return content, None
 
 # ─── Render Functions ─────────────────────────────────────────────────────────
-def get_terminal_width():
-    try:
-        return os.get_terminal_size().columns
-    except Exception:
-        return 80
-
-def strip_ansi(text):
-    """Menghapus kode ANSI dari string untuk menghitung panjang karakter yang tampil."""
-    return re.sub(r'\033\[[0-9;]*m', '', text)
-
 def render_welcome_panel(model_name, api_key_masked):
     """Render panel welcome ala Claude CLI."""
     w = min(get_terminal_width() - 4, 95)
@@ -120,15 +120,15 @@ def render_welcome_panel(model_name, api_key_masked):
     lines.append(f"  {B}╭{'─' * w}╮{R}")
     
     def dual_col(left_text, right_text):
-        l_vis = len(strip_ansi(left_text))
-        r_vis = len(strip_ansi(right_text))
+        l_vis = str_width(left_text)
+        r_vis = str_width(right_text)
         
         if l_vis > half_left - 2:
             left_text = left_text[:half_left - 5] + "..."
-            l_vis = len(strip_ansi(left_text))
+            l_vis = str_width(left_text)
         if r_vis > half_right - 2:
             right_text = right_text[:half_right - 5] + "..."
-            r_vis = len(strip_ansi(right_text))
+            r_vis = str_width(right_text)
             
         pad_l = max(0, half_left - l_vis - 1)
         pad_r = max(0, half_right - r_vis - 1)
@@ -163,7 +163,7 @@ def render_model_selector(current_idx):
     B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
 
     def print_line(content):
-        v_len = len(strip_ansi(content))
+        v_len = str_width(content)
         pad = max(0, w - v_len)
         print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
 
@@ -193,7 +193,7 @@ def render_help():
     B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
     
     def print_line(content):
-        v_len = len(strip_ansi(content))
+        v_len = str_width(content)
         pad = max(0, w - v_len)
         print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
 
@@ -220,24 +220,170 @@ def render_help():
     print_line("")
     print(f"  {B}╰{'─' * w}╯{R}\n")
 
-def print_lyra_message(text):
-    """Print pesan Lyra dengan prefix dan styling yang konsisten."""
-    lines = text.split("\n")
-    prefix    = f"  {BOLD}{COLOR_LYRA}Lyra ✦{RESET} "
-    continuation = "          "  # same width as prefix without color codes
+# ─── Stream Response Handler ─────────────────────────────────────────────────
+def stream_ai_response(headers, data, model_info=None):
+    """
+    Stream respons AI secara langsung dengan format Markdown di dalam Chat Bubble.
+    Mendukung tampilan proses penalaran (Thinking) yang terpisah secara rapi dari respons utama.
+    """
+    model_name = model_info.get("name", "Lyra") if model_info else "Lyra"
+    model_id = model_info.get("id", "") if model_info else ""
+    is_thinking_model = model_id in ("ivy-3", "lyra-nebula-4", "nexara-4.5") or "think" in model_id
 
-    for i, line in enumerate(lines):
-        if i == 0:
-            print(f"{prefix}{WHITE}{line}{RESET}")
-        else:
-            print(f"{continuation}{WHITE}{line}{RESET}")
+    sp_text = f"🧠 {model_name} sedang berpikir & menganalisis..." if is_thinking_model else "Lyra sedang berpikir..."
+    spinner = Spinner(sp_text)
+    spinner.start()
 
-def print_tool_status(func_name, args_str, done=False):
-    """Print status eksekusi tool."""
-    if done:
-        print(f"  {GREEN}✔{RESET} {DIM}Tool {COLOR_LYRA}{func_name}{RESET}{DIM} selesai.{RESET}\n")
-    else:
-        print(f"  {DIM}⚙  Memanggil: {RESET}{BOLD}{COLOR_LYRA}{func_name}{RESET}{DIM}({args_str}){RESET}")
+    try:
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json={**data, "stream": True},
+            stream=True,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except Exception as e:
+        spinner.stop()
+        return 0, f"Error koneksi: {e}"
+
+    spinner.stop()
+
+    if response.status_code != 200:
+        return response.status_code, response.text
+
+    header_printed = False
+    thinking_printed = False
+    in_thinking_mode = False
+
+    full_content = ""
+    thinking_buffer = ""
+    main_buffer = ""
+    markdown_state = {'in_code': False, 'lang': ''}
+    tool_call_detected = False
+
+    try:
+        for raw_line in response.iter_lines():
+            if not raw_line:
+                continue
+            line_str = raw_line.decode('utf-8')
+            if line_str.startswith("data: "):
+                payload_str = line_str[6:].strip()
+                if payload_str == "[DONE]":
+                    break
+                try:
+                    payload = json.loads(payload_str)
+                    delta = payload["choices"][0]["delta"]
+                    content_chunk = delta.get("content", "")
+                    reasoning_chunk = delta.get("reasoning_content", "") or delta.get("reasoning", "")
+                except Exception:
+                    continue
+
+                # 1. Explicit reasoning_content dari API
+                if reasoning_chunk:
+                    if not thinking_printed:
+                        render_thinking_top()
+                        thinking_printed = True
+                        in_thinking_mode = True
+
+                    thinking_buffer += reasoning_chunk
+                    while "\n" in thinking_buffer:
+                        line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
+                        rows = format_thinking_line_bubble(line_to_print)
+                        for r in rows:
+                            print(r)
+                        sys.stdout.flush()
+                    continue
+
+                if not content_chunk:
+                    continue
+
+                full_content += content_chunk
+
+                # 2. Tag <think> dalam teks
+                if "<think>" in full_content and "</think>" not in full_content:
+                    if not thinking_printed:
+                        render_thinking_top()
+                        thinking_printed = True
+                        in_thinking_mode = True
+                    
+                    think_chunk = content_chunk.replace("<think>", "")
+                    thinking_buffer += think_chunk
+                    while "\n" in thinking_buffer:
+                        line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
+                        rows = format_thinking_line_bubble(line_to_print)
+                        for r in rows:
+                            print(r)
+                        sys.stdout.flush()
+                    continue
+
+                # 3. Transisi saat tag </think> selesai
+                if in_thinking_mode and "</think>" in full_content:
+                    if thinking_buffer:
+                        rows = format_thinking_line_bubble(thinking_buffer)
+                        for r in rows:
+                            print(r)
+                        thinking_buffer = ""
+                    render_thinking_bottom()
+                    in_thinking_mode = False
+
+                # 4. Deteksi awal tool call XML
+                if "<tool_call>" in full_content or tool_call_detected:
+                    tool_call_detected = True
+                    continue
+
+                # 5. Tutup box thinking sebelum membuka box utama Lyra
+                if in_thinking_mode:
+                    if thinking_buffer:
+                        rows = format_thinking_line_bubble(thinking_buffer)
+                        for r in rows:
+                            print(r)
+                        thinking_buffer = ""
+                    render_thinking_bottom()
+                    in_thinking_mode = False
+
+                # 6. Buka Card AI Lyra Utama
+                if not header_printed:
+                    render_ai_bubble_top()
+                    header_printed = True
+
+                clean_chunk = content_chunk.replace("</think>", "")
+                main_buffer += clean_chunk
+                while "\n" in main_buffer:
+                    line_to_print, main_buffer = main_buffer.split("\n", 1)
+                    rows, markdown_state = format_markdown_line_bubble(line_to_print, markdown_state)
+                    for r in rows:
+                        print(r)
+                    sys.stdout.flush()
+
+        # Flush sisa buffer jika ada
+        if in_thinking_mode:
+            if thinking_buffer:
+                rows = format_thinking_line_bubble(thinking_buffer)
+                for r in rows:
+                    print(r)
+            render_thinking_bottom()
+            in_thinking_mode = False
+
+        if main_buffer and not tool_call_detected:
+            if not header_printed:
+                render_ai_bubble_top()
+                header_printed = True
+            rows, markdown_state = format_markdown_line_bubble(main_buffer, markdown_state)
+            for r in rows:
+                print(r)
+            sys.stdout.flush()
+
+        if header_printed:
+            render_ai_bubble_bottom()
+
+        return 200, full_content
+
+    except Exception as e:
+        if in_thinking_mode:
+            render_thinking_bottom()
+        if header_printed:
+            render_ai_bubble_bottom()
+        return 0, f"Error streaming: {e}"
 
 # ─── Slash Command Handlers ───────────────────────────────────────────────────
 def handle_model_command(config):
@@ -394,9 +540,6 @@ def main():
             messages.append({"role": "user", "content": user_input})
 
             while True:
-                spinner = Spinner(f"Lyra sedang berpikir...")
-                spinner.start()
-
                 current_model = MODELS[model_idx]["id"]
                 data = {
                     "model":       current_model,
@@ -404,112 +547,75 @@ def main():
                     "temperature": 0.2,
                 }
 
-                try:
-                    response = requests.post(
-                        API_URL,
-                        headers=headers,
-                        json=data,
-                        timeout=DEFAULT_TIMEOUT,
-                    )
-                    spinner.stop()
+                status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
 
-                    if response.status_code == 200:
-                        resp_json  = response.json()
-                        ai_message = resp_json["choices"][0]["message"]["content"]
-
-                        text_before, tool_call_json = extract_tool_call(ai_message)
-
-                        if text_before:
-                            print()
-                            print_lyra_message(text_before)
-
-                        # Simpan respons ke riwayat
-                        messages.append({"role": "assistant", "content": ai_message})
-
-                        if tool_call_json:
-                            try:
-                                tool_call = json.loads(tool_call_json)
-                                func_name = tool_call.get("name", "")
-                                args      = tool_call.get("arguments", {})
-                            except Exception:
-                                print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
-                                break
-
-                            args_str = ", ".join(f"{k}={repr(v)}" for k, v in args.items())
-                            print()
-                            print_tool_status(func_name, args_str)
-
-                            # Dispatch tool
-                            if func_name == "list_directory":
-                                result = list_directory(
-                                    args.get("path", "."),
-                                    args.get("recursive", False),
-                                    args.get("depth", 2),
-                                )
-                            elif func_name == "read_file":
-                                result = read_file(args.get("filepath"))
-                            elif func_name == "write_file":
-                                result = write_file(args.get("filepath"), args.get("content", ""))
-                            elif func_name == "create_directory":
-                                result = create_directory(args.get("dirpath"))
-                            elif func_name == "execute_command":
-                                result = execute_command(
-                                    args.get("command"),
-                                    timeout=args.get("timeout", DEFAULT_TIMEOUT),
-                                    cwd=args.get("cwd", active_cwd),
-                                )
-                            elif func_name == "init_project":
-                                result = init_project(
-                                    args.get("project_type", ""),
-                                    args.get("project_name", "project"),
-                                    args.get("target_dir", active_cwd),
-                                )
-                            else:
-                                result = f"Error: Tool '{func_name}' tidak dikenal."
-
-                            print_tool_status(func_name, args_str, done=True)
-
-                            messages.append({
-                                "role":    "user",
-                                "content": f"[Hasil Tool '{func_name}']\n{result}",
-                            })
-                            continue  # Kirim lagi ke AI dengan hasil tool
-
-                        else:
-                            if not text_before and ai_message:
-                                print()
-                                print_lyra_message(ai_message)
-                            print()
-                            break
-
-                    elif response.status_code == 401:
-                        print(f"\n  {RED}[401] API Key tidak valid atau tidak memiliki akses.{RESET}")
-                        if input("  Reset API Key? (y/n): ").strip().lower() == 'y':
-                            reset_api_key(config)
-                            api_key = get_api_key(config=config, force_prompt=True)
-                            headers["Authorization"] = f"Bearer {api_key}"
-                            continue
-                        else:
-                            if messages[-1]["role"] == "user":
-                                messages.pop()
-                            break
-
+                if status_code == 401:
+                    print(f"\n  {RED}[401] API Key tidak valid atau tidak memiliki akses.{RESET}")
+                    if input("  Reset API Key? (y/n): ").strip().lower() == 'y':
+                        reset_api_key(config)
+                        api_key = get_api_key(config=config, force_prompt=True)
+                        headers["Authorization"] = f"Bearer {api_key}"
+                        continue
                     else:
-                        print(f"\n  {RED}[{response.status_code}] Gagal mendapatkan jawaban.{RESET}")
-                        print(f"  {RED}{response.text[:500]}{RESET}\n")
                         if messages[-1]["role"] == "user":
                             messages.pop()
                         break
 
-                except requests.exceptions.Timeout:
-                    spinner.stop()
-                    print(f"\n  {RED}Request timeout setelah {DEFAULT_TIMEOUT} detik.{RESET}")
-                    print(f"  {DIM}Coba gunakan model yang lebih cepat atau sederhanakan pertanyaan.{RESET}\n")
+                elif status_code != 200:
+                    print(f"\n  {RED}[{status_code}] Gagal mendapatkan jawaban.{RESET}")
+                    print(f"  {RED}{full_content[:300]}{RESET}\n")
                     if messages[-1]["role"] == "user":
                         messages.pop()
                     break
-                except Exception as e:
-                    spinner.stop()
+
+                text_before, tool_call_json = extract_tool_call(full_content)
+                messages.append({"role": "assistant", "content": full_content})
+
+                if tool_call_json:
+                    try:
+                        tool_call = json.loads(tool_call_json)
+                        func_name = tool_call.get("name", "")
+                        args      = tool_call.get("arguments", {})
+                    except Exception:
+                        print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
+                        break
+
+                    # Dispatch tool (permission box akan muncul otomatis jika perlu)
+                    if func_name == "list_directory":
+                        result = list_directory(
+                            args.get("path", "."),
+                            args.get("recursive", False),
+                            args.get("depth", 2),
+                        )
+                    elif func_name == "read_file":
+                        result = read_file(args.get("filepath"))
+                    elif func_name == "write_file":
+                        result = write_file(args.get("filepath"), args.get("content", ""))
+                    elif func_name == "create_directory":
+                        result = create_directory(args.get("dirpath"))
+                    elif func_name == "execute_command":
+                        result = execute_command(
+                            args.get("command"),
+                            timeout=args.get("timeout", DEFAULT_TIMEOUT),
+                            cwd=args.get("cwd", active_cwd),
+                        )
+                    elif func_name == "init_project":
+                        result = init_project(
+                            args.get("project_type", ""),
+                            args.get("project_name", "project"),
+                            args.get("target_dir", active_cwd),
+                        )
+                    else:
+                        result = f"Error: Tool '{func_name}' tidak dikenal."
+
+                    messages.append({
+                        "role":    "user",
+                        "content": f"[Hasil Tool '{func_name}']\n{result}",
+                    })
+                    continue  # Lanjutkan respons AI dengan hasil tool
+
+                else:
+                    break
                     print(f"\n  {RED}Kesalahan: {e}{RESET}\n")
                     if messages[-1]["role"] == "user":
                         messages.pop()
