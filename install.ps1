@@ -8,9 +8,9 @@ $GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 $INSTALL_DIR = "$HOME\.amagi-cli"
 $FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py")
 
-Write-Host "==================================================" -ForegroundColor Purple
+Write-Host "==================================================" -ForegroundColor Magenta
 Write-Host "        Installing Amagi CLI AI Assistant          " -ForegroundColor Cyan
-Write-Host "==================================================" -ForegroundColor Purple
+Write-Host "==================================================" -ForegroundColor Magenta
 
 # 1. Check Python
 $pythonCmd = $null
@@ -85,7 +85,7 @@ if ($userPath -notlike "*$BIN_DIR*") {
 }
 
 Write-Host "`n✓ Amagi CLI successfully installed!" -ForegroundColor Green
-Write-Host "==================================================" -ForegroundColor Purple
+Write-Host "==================================================" -ForegroundColor Magenta
 Write-Host "Untuk menjalankannya, silakan buka Terminal / PowerShell baru lalu ketik:"
 Write-Host "  amagi" -ForegroundColor Cyan
-Write-Host "==================================================" -ForegroundColor Purple
+Write-Host "==================================================" -ForegroundColor Magenta
