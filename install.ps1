@@ -53,15 +53,20 @@ foreach ($file in $FILES) {
 # 4. Set up Virtual Environment
 Write-Host "Setting up virtual environment..." -ForegroundColor Cyan
 $venvPath = Join-Path $INSTALL_DIR "venv"
-if (!(Test-Path $venvPath)) {
+$pythonVenv = Join-Path $venvPath "Scripts\python.exe"
+
+if (!(Test-Path $pythonVenv)) {
     & $pythonCmd -m venv $venvPath
 }
 
-$pipExe = Join-Path $venvPath "Scripts\pip.exe"
-$pythonVenv = Join-Path $venvPath "Scripts\python.exe"
-
 Write-Host "Installing dependencies (requests)..." -ForegroundColor Cyan
-& $pipExe install requests --quiet
+if (Test-Path $pythonVenv) {
+    & $pythonVenv -m ensurepip --default-pip 2>$null | Out-Null
+    & $pythonVenv -m pip install requests --quiet
+} else {
+    $pythonVenv = $pythonCmd
+    & $pythonCmd -m pip install requests --quiet
+}
 
 # 5. Create amagi.cmd wrapper in User Bin directory
 $BIN_DIR = Join-Path $HOME ".local\bin"
