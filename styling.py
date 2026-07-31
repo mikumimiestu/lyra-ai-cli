@@ -1,6 +1,10 @@
 import sys
 import os
 
+# ─── Enable ANSI color support on Windows Console ────────────────────────────
+if sys.platform == "win32":
+    os.system("")
+
 # ─── Terminal Color Detection ─────────────────────────────────────────────────
 def _detect_dark_bg():
     """

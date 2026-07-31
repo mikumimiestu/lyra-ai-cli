@@ -20,12 +20,18 @@ Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untu
 ### Cara Instalasi
 
 #### Metode 1: Instalasi Cepat Satu Baris (Rekomendasi)
-Jalankan perintah ini di terminal Anda untuk mengunduh dan memasang Amagi CLI secara otomatis:
+
+**Untuk macOS / Linux (Terminal):**
 ```bash
 curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
-#### Metode 2: Menggunakan Pip (Langsung dari GitHub)
+**Untuk Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
+```
+
+#### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
 pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 ```
@@ -90,12 +96,18 @@ Amagi CLI is a modern, interactive, and beautifully styled terminal chat client 
 ### Installation
 
 #### Method 1: Quick One-Liner Install (Recommended)
-Run the following command in your terminal to automatically download and set up Amagi CLI:
+
+**For macOS / Linux (Terminal):**
 ```bash
 curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
-#### Method 2: Via Pip (Directly from GitHub)
+**For Windows (PowerShell):**
+```powershell
+iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
+```
+
+#### Method 2: Via Pip (Cross-Platform)
 ```bash
 pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 ```
