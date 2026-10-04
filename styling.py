@@ -513,7 +513,7 @@ def render_header(model_name, reasoning_effort, active_cwd):
     
     reasoning_label = "penalaran cepat" if reasoning_effort == "low" else "penalaran sedang"
     
-    header_title = f"{BOLD}{COLOR_LYRA}Lyra CLI v2.1.0{RESET}"
+    header_title = f"{BOLD}{COLOR_LYRA}Lyra CLI v2.1.1{RESET}"
     header_sub   = f"{COLOR_DIM}Model    : {RESET}{BOLD}{WHITE}{model_name}{RESET} {COLOR_DIM}({reasoning_label}) · AstByte AI{RESET}"
     header_path  = f"{COLOR_DIM}Direktori: {RESET}{COLOR_TITLE}{cwd_short}{RESET}"
     

@@ -30,33 +30,26 @@ from config import (
 API_URL = "https://authx.astbyte.com/v1/chat/completions"
 
 # ─── Model Definitions ────────────────────────────────────────────────────────
+# ─── Model Definitions ────────────────────────────────────────────────────────
 MODELS = [
     {
         "id":                 "lyra-luma-flash",
-        "name":               "Lyra Luma 5.5 (instant)",
-        "desc":               "Tercepat & responsif untuk tugas instan sehari-hari",
-        "tag":                "⚡ Instant",
+        "name":               "Lyra Luma 5.5",
         "supports_reasoning": False,
     },
     {
         "id":                 "lyra-nebula-4",
         "name":               "Lyra Nebula 4",
-        "desc":               "Paling mampu untuk pekerjaan kompleks",
-        "tag":                "🌌 Powerful",
         "supports_reasoning": True,
     },
     {
         "id":                 "lyra-orpheus-6",
         "name":               "Lyra Orpheus 6",
-        "desc":               "Model penalaran canggih & kreasi kode tingkat tinggi",
-        "tag":                "🎵 Advanced Reasoning",
         "supports_reasoning": True,
     },
     {
         "id":                 "lyra-eurydice-6",
         "name":               "Lyra Eurydice 6",
-        "desc":               "Model penalaran mendalam dengan tingkat presisi tinggi",
-        "tag":                "✨ Deep Precision",
         "supports_reasoning": True,
     },
 ]
@@ -137,9 +130,9 @@ def extract_tool_call(content):
 
 # ─── Render Functions ─────────────────────────────────────────────────────────
 def render_model_selector(current_idx):
-    """Render model selector interaktif dengan layout presisi tanpa overflow."""
+    """Render model selector interaktif sederhana hanya dengan nama model."""
     term_w = get_terminal_width()
-    w = max(70, min(term_w - 6, 110))
+    w = max(50, min(term_w - 6, 80))
     B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
 
     def print_line(content):
@@ -153,8 +146,6 @@ def render_model_selector(current_idx):
     print_line(f"  {BOLD}{A}Pilih Model AI{R}")
     print_line(f"  {D}Ganti model AI untuk sesi ini dan simpan di preferensi.{R}")
     print_line("")
-    
-    desc_max = max(12, w - 4 - 5 - 26 - 22)
 
     for i, m in enumerate(MODELS):
         selected = (i == current_idx)
@@ -163,22 +154,8 @@ def render_model_selector(current_idx):
         
         name_plain = m['name'] + (" ✓" if selected else "")
         name_formatted = f"{BOLD}{COLOR_LYRA}{name_plain}{R}" if selected else f"{BOLD}{T}{name_plain}{R}"
-        pad_name = max(0, 26 - str_width(name_plain))
-        sp_name = " " * pad_name
-        name_col = f"{name_formatted}{sp_name}"
 
-        tag_plain = m['tag']
-        tag_formatted = f"{A}{tag_plain}{R}" if selected else f"{D}{tag_plain}{R}"
-        pad_tag = max(0, 22 - str_width(tag_plain))
-        sp_tag = " " * pad_tag
-        tag_col = f"{tag_formatted}{sp_tag}"
-
-        desc_plain = m['desc']
-        if str_width(desc_plain) > desc_max:
-            desc_plain = desc_plain[:max(0, desc_max - 3)] + "..."
-        desc_col = f"{D}{desc_plain}{R}"
-
-        print_line(f" {cursor} {num_str} {name_col}{tag_col}{desc_col}")
+        print_line(f" {cursor} {num_str} {name_formatted}")
         
     print_line("")
     print_line(f"  {D}Masukkan nomor (1-{len(MODELS)}) lalu Enter • Tekan Enter untuk batal{R}")
