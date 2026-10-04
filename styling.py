@@ -513,7 +513,7 @@ def render_header(model_name, reasoning_effort, active_cwd):
     
     reasoning_label = "penalaran cepat" if reasoning_effort == "low" else "penalaran sedang"
     
-    header_title = f"{BOLD}{COLOR_LYRA}Lyra CLI v2.0{RESET}"
+    header_title = f"{BOLD}{COLOR_LYRA}Lyra CLI v2.1.0{RESET}"
     header_sub   = f"{COLOR_DIM}Model    : {RESET}{BOLD}{WHITE}{model_name}{RESET} {COLOR_DIM}({reasoning_label}) · AstByte AI{RESET}"
     header_path  = f"{COLOR_DIM}Direktori: {RESET}{COLOR_TITLE}{cwd_short}{RESET}"
     
@@ -524,10 +524,12 @@ def render_header(model_name, reasoning_effort, active_cwd):
     print(f"  {BOLD}{COLOR_ACCENT}Perintah Utama:{RESET}")
     print(f"    {BOLD}{YELLOW}/model{RESET}      {COLOR_DIM}- Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5){RESET}")
     print(f"    {BOLD}{YELLOW}/reasoning{RESET}  {COLOR_DIM}- Atur tingkat penalaran (cepat / sedang){RESET}")
+    print(f"    {BOLD}{YELLOW}/update{RESET}     {COLOR_DIM}- Cek & perbarui Lyra CLI ke versi terbaru otomatis{RESET}")
     print(f"    {BOLD}{YELLOW}/project{RESET}    {COLOR_DIM}- Wizard pembuat project baru (React, Next.js, Laravel, FastAPI...){RESET}")
     print(f"    {BOLD}{YELLOW}/clear{RESET}      {COLOR_DIM}- Bersihkan riwayat chat{RESET}")
     print(f"    {BOLD}{YELLOW}/help{RESET}       {COLOR_DIM}- Lihat semua perintah yang tersedia{RESET}")
     print(f"    {BOLD}{YELLOW}exit{RESET}        {COLOR_DIM}- Keluar dari aplikasi{RESET}\n")
+
 
 
 def render_full_divider(color=COLOR_BORDER):

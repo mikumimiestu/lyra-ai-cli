@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 $INSTALL_DIR = "$HOME\.amagi-cli"
-$FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py")
+$FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py", "version.txt")
 
 Write-Host "==================================================" -ForegroundColor Magenta
 Write-Host "        Installing Amagi CLI AI Assistant          " -ForegroundColor Cyan

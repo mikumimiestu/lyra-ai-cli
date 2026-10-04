@@ -4,6 +4,7 @@ import sys
 import os
 import re
 import time
+import threading
 
 # ─── Import custom modules ────────────────────────────────────────────────────
 from styling import (
@@ -19,7 +20,11 @@ from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT
 )
-from config import get_api_key, reset_api_key, save_config, load_config
+from config import (
+    get_api_key, reset_api_key, save_config, load_config,
+    VERSION, check_remote_version, perform_update
+)
+
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 API_URL = "https://authx.astbyte.com/v1/chat/completions"
@@ -235,6 +240,40 @@ def handle_model_command(config):
         print(f"  {RED}Input tidak valid.{RESET}\n")
         return current_idx
 
+def handle_update_command(interactive=True):
+    """Interaktif cek & perbarui Lyra CLI ke versi terbaru dari GitHub."""
+    print(f"\n  {BOLD}{COLOR_LYRA}✦ Cek Pembaruan Lyra CLI{RESET}")
+    spinner = Spinner("Memeriksa versi terbaru di GitHub...")
+    spinner.start()
+    has_update, latest_version = check_remote_version(timeout=6.0)
+    spinner.stop()
+
+    if not has_update:
+        print(f"  {GREEN}✓ Lyra CLI Anda sudah menggunakan versi terbaru (v{VERSION}).{RESET}\n")
+        return
+
+    print(f"  {YELLOW}⚡ Versi terbaru tersedia: {BOLD}v{latest_version}{RESET} {DIM}(Versi saat ini: v{VERSION}){RESET}\n")
+    if interactive:
+        try:
+            choice = input(f"  {BOLD}{COLOR_USER}Apakah Anda ingin mengunduh & memperbarui sekarang? (y/n) ❯{RESET} ").strip().lower()
+            if choice != 'y':
+                print(f"  {DIM}Pembaruan dibatalkan.{RESET}\n")
+                return
+        except (EOFError, KeyboardInterrupt):
+            print(f"  {DIM}Dibatalkan.{RESET}\n")
+            return
+
+    spin_up = Spinner("Mengunduh & menginstal file terbaru dari GitHub...")
+    spin_up.start()
+    success, msg = perform_update()
+    spin_up.stop()
+
+    if success:
+        print(f"  {GREEN}✓ {msg}{RESET}")
+        print(f"  {BOLD}{COLOR_ACCENT}✦ Lyra CLI berhasil diperbarui ke v{latest_version}! Silakan jalankan ulang 'amagi'.{RESET}\n")
+    else:
+        print(f"  {RED}✖ Gagal memperbarui: {msg}{RESET}\n")
+
 def render_help():
     """Tampilkan panel bantuan."""
     w = min(get_terminal_width() - 4, 80)
@@ -246,12 +285,14 @@ def render_help():
         print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
 
     print(f"\n  {B}╭{'─' * w}╮{R}")
-    print_line(f"  {BOLD}{A}Perintah Lyra CLI{R}")
+    print_line(f"  {BOLD}{A}Perintah Lyra CLI (v{VERSION}){R}")
     print_line("")
     
     cmds = [
         ("/model",          "Buka pilihan model AI"),
         ("/reasoning",      "Pilih tingkat penalaran (cepat / sedang)"),
+        ("/update",         "Cek & perbarui Lyra CLI ke versi terbaru"),
+        ("/version",        "Tampilkan versi Lyra CLI saat ini"),
         ("/project",        "Buat project baru (React, Laravel, PHP, dll.)"),
         ("/clear",          "Bersihkan riwayat percakapan"),
         ("/history",        "Tampilkan ringkasan riwayat chat"),
@@ -268,6 +309,7 @@ def render_help():
         
     print_line("")
     print(f"  {B}╰{'─' * w}╯{R}\n")
+
 
 # ─── Stream Response Handler ─────────────────────────────────────────────────
 def stream_ai_response(headers, data, model_info=None):
@@ -479,6 +521,17 @@ def main():
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     active_cwd = os.getcwd()
 
+    # ── Background Version Check ──────────────────────────────────────────────
+    update_state = {"has_update": False, "latest_version": VERSION, "notified": False}
+
+    def _bg_check_update():
+        has_up, latest_v = check_remote_version(timeout=4.0)
+        if has_up:
+            update_state["has_update"] = True
+            update_state["latest_version"] = latest_v
+
+    threading.Thread(target=_bg_check_update, daemon=True).start()
+
     # Render Logo Gradasi Amagi & Header
     print_logo()
     render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd)
@@ -488,6 +541,10 @@ def main():
         try:
             model_info = MODELS[model_idx]
             current_effort = config.get("reasoning_effort", "medium")
+
+            if update_state["has_update"] and not update_state["notified"]:
+                update_state["notified"] = True
+                print(f"  {YELLOW}⚡ Versi terbaru (v{update_state['latest_version']}) tersedia! Ketik {BOLD}/update{RESET}{YELLOW} untuk memperbarui otomatis.{RESET}\n")
 
             render_full_divider(COLOR_BORDER)
             prompt_str = f"  {BOLD}{COLOR_USER}❯{RESET} "
@@ -515,9 +572,18 @@ def main():
                 reasoning_effort = handle_reasoning_command(config)
                 continue
 
+            elif user_input.lower() in ("/update", "/check-update"):
+                handle_update_command(interactive=True)
+                continue
+
+            elif user_input.lower() in ("/version", "/v"):
+                print(f"  {BOLD}{COLOR_LYRA}Lyra CLI v{VERSION}{RESET} {DIM}(AstByte AI Terminal Agent){RESET}\n")
+                continue
+
             elif user_input.lower() == "/project":
                 handle_project_command(active_cwd)
                 continue
+
 
             elif user_input.lower() == "/clear":
                 messages = [{"role": "system", "content": SYSTEM_PROMPT}]

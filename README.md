@@ -26,6 +26,7 @@ Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untu
     *   `Lyra Nebula 4` - Paling mampu untuk pekerjaan kompleks & skala besar.
     *   `Lyra Luma 5.5 (instant)` - Tercepat & responsif untuk tugas instan sehari-hari.
 *   **Pengaturan Tingkat Penalaran (Reasoning Effort):** Pilihan penalaran `Cepat (Low effort)` atau `Sedang (Medium effort)` via `/reasoning` atau `/model`.
+*   **Auto-Update Otomatis:** Deteksi versi baru dari GitHub di latar belakang dan opsi perbarui aplikasi langsung dengan perintah `/update`.
 *   **Render Tabel Grid Presisi:** Otomatis mengubah tabel Markdown dari respons AI menjadi tabel Unicode Box Grid (`┌───┬───┐`, `├───┼───┤`, `└───┴───┘`) yang rapi dan terukur.
 *   **Konfirmasi Eksekusi Script Rapi:** Tampilan dialog izin eksekusi script multi-baris di-box dengan indentasi 4 spasi dan *syntax highlighting*.
 *   **Agen AI Lokal (Tool Calling):** AI dapat mendaftar isi folder, membaca file, menulis file baru, scaffolding project (`/project`), dan mengeksekusi perintah terminal secara aman.
@@ -71,6 +72,8 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | :--- | :--- |
 | `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5) |
 | `/reasoning` | Atur tingkat penalaran (`cepat` / `sedang`) |
+| `/update` | Cek & perbarui Lyra CLI ke versi terbaru dari GitHub secara otomatis |
+| `/version` | Tampilkan versi Lyra CLI saat ini |
 | `/project` | Wizard scaffolding project baru (React, Next.js, Laravel, FastAPI, Express, dll.) |
 | `/clear` | Bersihkan riwayat chat |
 | `/history` | Tampilkan ringkasan riwayat percakapan |

@@ -77,3 +77,66 @@ def reset_api_key(config: dict = None):
         except Exception:
             pass
     print(f"  {GREEN}✓ API Key berhasil dihapus.{RESET}\n")
+
+# ─── Version & Auto-Update ───────────────────────────────────────────────────
+VERSION = "2.1.0"
+GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
+RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
+RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
+FILES_TO_UPDATE = ["app.py", "styling.py", "spinner.py", "tools.py", "config.py", "setup.py", "version.txt"]
+
+def parse_version_tuple(v_str: str):
+    """Konversi string versi '2.1.0' atau 'v2.1.0' menjadi tuple angka (2, 1, 0)"""
+    try:
+        clean = v_str.strip().lstrip("v")
+        return tuple(int(x) for x in clean.split(".") if x.isdigit())
+    except Exception:
+        return (0, 0, 0)
+
+def check_remote_version(timeout=4.0):
+    """
+    Cek versi terbaru dari GitHub secara langsung.
+    Return: (has_update: bool, latest_version_str: str)
+    """
+    try:
+        import requests
+        resp = requests.get(RAW_VERSION_URL, timeout=timeout)
+        if resp.status_code == 200:
+            remote_v = resp.text.strip()
+            if parse_version_tuple(remote_v) > parse_version_tuple(VERSION):
+                return True, remote_v
+            return False, remote_v
+    except Exception:
+        pass
+    return False, VERSION
+
+def perform_update(target_dir=None):
+    """
+    Download file terbaru dari GitHub ke direktori instalasi.
+    """
+    import requests
+    if not target_dir:
+        install_dir = os.path.expanduser("~/.amagi-cli")
+        if os.path.exists(os.path.join(install_dir, "app.py")):
+            target_dir = install_dir
+        else:
+            target_dir = os.path.dirname(os.path.abspath(__file__))
+
+    os.makedirs(target_dir, exist_ok=True)
+    updated_files = []
+    for fname in FILES_TO_UPDATE:
+        url = f"{RAW_BASE_URL}{fname}"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                dest = os.path.join(target_dir, fname)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(resp.text)
+                updated_files.append(fname)
+            else:
+                return False, f"Gagal mengunduh {fname} (HTTP {resp.status_code})"
+        except Exception as e:
+            return False, f"Gagal mengunduh {fname}: {e}"
+
+    return True, f"Berhasil memperbarui {len(updated_files)} file ke {target_dir}"
+

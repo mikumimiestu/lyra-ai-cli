@@ -34,7 +34,7 @@ mkdir -p "$INSTALL_DIR"
 # 3. Retrieve files
 # If files exist in current directory, we copy them (Local Dev Mode)
 # Otherwise, we download them from raw.githubusercontent.com
-FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py")
+FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "version.txt")
 LOCAL_MODE=false
 
 if [ -f "app.py" ] && [ -f "styling.py" ]; then
