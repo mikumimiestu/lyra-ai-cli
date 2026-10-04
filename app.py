@@ -11,9 +11,8 @@ from styling import (
     COLOR_USER, COLOR_LYRA, COLOR_BORDER, COLOR_DIM, COLOR_TITLE,
     COLOR_ACCENT, print_logo, rgb_to_ansi, hex_to_rgb,
     get_terminal_width, strip_ansi, str_width, format_markdown_line,
-    render_ai_bubble_top, render_ai_bubble_bottom,
-    format_markdown_line_bubble, render_thinking_top,
-    render_thinking_bottom, format_thinking_line_bubble
+    render_header, render_footer_bar, render_markdown_table,
+    render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
 from spinner import Spinner
 from tools import (
@@ -28,38 +27,41 @@ API_URL = "https://authx.astbyte.com/v1/chat/completions"
 # ─── Model Definitions ────────────────────────────────────────────────────────
 MODELS = [
     {
-        "id":   "lyra-luma-flash",
-        "name": "Lyra Luma Flash",
-        "desc": "Tercepat untuk tugas sehari-hari",
-        "tag":  "⚡ Fast",
+        "id":                 "lyra-luma-flash",
+        "name":               "Lyra Luma 5.5 (instant)",
+        "desc":               "Tercepat & responsif untuk tugas instan sehari-hari",
+        "tag":                "⚡ Instant",
+        "supports_reasoning": False,
     },
     {
-        "id":   "lyra-luma-4",
-        "name": "Lyra Luma 4",
-        "desc": "Seimbang antara kecepatan & kualitas",
-        "tag":  "⚖ Balanced",
+        "id":                 "lyra-nebula-4",
+        "name":               "Lyra Nebula 4",
+        "desc":               "Paling mampu untuk pekerjaan kompleks",
+        "tag":                "🌌 Powerful",
+        "supports_reasoning": True,
     },
     {
-        "id":   "lyra-nebula-4",
-        "name": "Lyra Nebula 4",
-        "desc": "Paling mampu untuk pekerjaan kompleks",
-        "tag":  "🌌 Powerful",
+        "id":                 "lyra-orpheus-6",
+        "name":               "Lyra Orpheus 6",
+        "desc":               "Model penalaran canggih & kreasi kode tingkat tinggi",
+        "tag":                "🎵 Advanced Reasoning",
+        "supports_reasoning": True,
     },
     {
-        "id":   "nexara-4.5",
-        "name": "Nexara 4.5",
-        "desc": "Model generasi berikutnya dari Nexara",
-        "tag":  "🚀 Next-Gen",
-    },
-    {
-        "id":   "ivy-3",
-        "name": "Ivy 3",
-        "desc": "Model penalaran mendalam & analitis",
-        "tag":  "🧠 Thinking",
+        "id":                 "lyra-eurydice-6",
+        "name":               "Lyra Eurydice 6",
+        "desc":               "Model penalaran mendalam dengan tingkat presisi tinggi",
+        "tag":                "✨ Deep Precision",
+        "supports_reasoning": True,
     },
 ]
 
-DEFAULT_MODEL_INDEX = 0   # lyra-luma-flash
+DEFAULT_MODEL_INDEX = 2   # Lyra Orpheus 6
+
+REASONING_EFFORTS = [
+    {"id": "low", "name": "Cepat (Low effort)", "desc": "Penalaran singkat, waktu respon super cepat"},
+    {"id": "medium", "name": "Sedang (Medium effort)", "desc": "Penalaran seimbang, analisa lebih komprehensif"},
+]
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """Kamu adalah Lyra, asisten AI canggih dari AstByte yang berjalan di terminal.
@@ -129,84 +131,109 @@ def extract_tool_call(content):
     return content, None
 
 # ─── Render Functions ─────────────────────────────────────────────────────────
-def render_welcome_panel(model_name, api_key_masked):
-    """Render panel welcome ala Claude CLI."""
-    w = min(get_terminal_width() - 4, 95)
-    B, T, D, A, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_DIM, COLOR_ACCENT, YELLOW, RESET
-    
-    half_left = w // 2
-    half_right = w - half_left - 1
-    
-    lines = []
-    lines.append(f"  {B}╭{'─' * w}╮{R}")
-    
-    def dual_col(left_text, right_text):
-        l_vis = str_width(left_text)
-        r_vis = str_width(right_text)
-        
-        if l_vis > half_left - 2:
-            left_text = left_text[:half_left - 5] + "..."
-            l_vis = str_width(left_text)
-        if r_vis > half_right - 2:
-            right_text = right_text[:half_right - 5] + "..."
-            r_vis = str_width(right_text)
-            
-        pad_l = max(0, half_left - l_vis - 1)
-        pad_r = max(0, half_right - r_vis - 1)
-        
-        content = f" {left_text}{' ' * pad_l}{B}│{R} {right_text}{' ' * pad_r}"
-        return f"  {B}│{R}{content}{B}│{R}"
-    
-    welcome_text  = f"{BOLD}{T}Welcome back!{R}"
-    tips_text     = f"{A}{BOLD}Tips untuk memulai{R}"
-    lines.append(dual_col(welcome_text, tips_text))
-    lines.append(f"  {B}│{' ' * half_left}│{' ' * half_right}│{R}")
-    
-    model_text    = f"{D}Model  : {R}{BOLD}{COLOR_LYRA}{model_name}{R}"
-    tip1_text     = f"{D}Ketik {R}{BOLD}/model{R}{D} untuk ganti model AI{R}"
-    lines.append(dual_col(model_text, tip1_text))
-    
-    if len(api_key_masked) > 30:
-        api_key_masked = api_key_masked[:8] + "..." + api_key_masked[-4:]
-    key_text      = f"{D}API Key: {R}{DIM}{api_key_masked}{R}"
-    tip2_text     = f"{D}Ketik {R}{BOLD}/project{R}{D} untuk buat project baru{R}"
-    lines.append(dual_col(key_text, tip2_text))
-    
-    tip3_text     = f"{D}Ketik {R}{BOLD}/help{R}{D} untuk lihat semua perintah{R}"
-    lines.append(dual_col("", tip3_text))
-    
-    lines.append(f"  {B}╰{'─' * w}╯{R}")
-    return "\n".join(lines)
-
 def render_model_selector(current_idx):
-    """Render model selector interaktif ala Claude CLI."""
-    w = min(get_terminal_width() - 4, 80)
+    """Render model selector interaktif dengan layout presisi tanpa overflow."""
+    term_w = get_terminal_width()
+    w = max(70, min(term_w - 6, 110))
     B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
 
     def print_line(content):
         v_len = str_width(content)
         pad = max(0, w - v_len)
-        print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
+        sp = " " * pad
+        print(f"  {B}│{R}{content}{sp}{B}│{R}")
 
-    print(f"\n  {B}╭{'─' * w}╮{R}")
-    print_line(f"  {BOLD}{A}Pilih Model{R}")
-    print_line(f"  {D}Ganti model AI untuk sesi ini dan sesi berikutnya.{R}")
+    top_b = "─" * w
+    print(f"\n  {B}╭{top_b}╮{R}")
+    print_line(f"  {BOLD}{A}Pilih Model AI{R}")
+    print_line(f"  {D}Ganti model AI untuk sesi ini dan simpan di preferensi.{R}")
     print_line("")
     
+    desc_max = max(12, w - 4 - 5 - 26 - 22)
+
     for i, m in enumerate(MODELS):
         selected = (i == current_idx)
         cursor   = f"{BOLD}{A}❯{R}" if selected else " "
-        num_col  = f"{BOLD}{T}{i+1}.{R}" if not selected else f"{BOLD}{A}{i+1}.{R}"
-        tag_col  = f"{A}{m['tag']}{R}" if selected else f"{D}{m['tag']}{R}"
-        name_col = f"{BOLD}{COLOR_LYRA}{m['name']}{R}" if selected else f"{BOLD}{T}{m['name']}{R}"
-        desc_col = f"{D}{m['desc']}{R}"
-        check    = f" {GREEN}✓{R}" if selected else "  "
+        num_str  = f"{BOLD}{A}{i+1}.{R}" if selected else f"{BOLD}{T}{i+1}.{R}"
         
-        print_line(f" {cursor} {num_col} {name_col}{check}   {tag_col}   {desc_col}")
+        name_plain = m['name'] + (" ✓" if selected else "")
+        name_formatted = f"{BOLD}{COLOR_LYRA}{name_plain}{R}" if selected else f"{BOLD}{T}{name_plain}{R}"
+        pad_name = max(0, 26 - str_width(name_plain))
+        sp_name = " " * pad_name
+        name_col = f"{name_formatted}{sp_name}"
+
+        tag_plain = m['tag']
+        tag_formatted = f"{A}{tag_plain}{R}" if selected else f"{D}{tag_plain}{R}"
+        pad_tag = max(0, 22 - str_width(tag_plain))
+        sp_tag = " " * pad_tag
+        tag_col = f"{tag_formatted}{sp_tag}"
+
+        desc_plain = m['desc']
+        if str_width(desc_plain) > desc_max:
+            desc_plain = desc_plain[:max(0, desc_max - 3)] + "..."
+        desc_col = f"{D}{desc_plain}{R}"
+
+        print_line(f" {cursor} {num_str} {name_col}{tag_col}{desc_col}")
         
     print_line("")
     print_line(f"  {D}Masukkan nomor (1-{len(MODELS)}) lalu Enter • Tekan Enter untuk batal{R}")
-    print(f"  {B}╰{'─' * w}╯{R}")
+    bot_b = "─" * w
+    print(f"  {B}╰{bot_b}╯{R}")
+
+def handle_reasoning_command(config):
+    """Pilih tingkat penalaran (cepat / sedang)."""
+    current_effort = config.get("reasoning_effort", "medium")
+    print(f"\n  {BOLD}{COLOR_LYRA}✦ Pilih Tingkat Penalaran (Reasoning Effort){RESET}\n")
+    print(f"  1. {BOLD}Cepat (Low effort){RESET}   {DIM}- Penalaran singkat, waktu respon super cepat{RESET}")
+    print(f"  2. {BOLD}Sedang (Medium effort){RESET} {DIM}- Penalaran mendalam seimbang{RESET}")
+    try:
+        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-2) ❯{RESET} ").strip()
+        if choice == "1":
+            config["reasoning_effort"] = "low"
+            save_config(config)
+            print(f"  {GREEN}✓ Tingkat penalaran diubah ke: Cepat (Low effort){RESET}\n")
+            return "low"
+        elif choice == "2":
+            config["reasoning_effort"] = "medium"
+            save_config(config)
+            print(f"  {GREEN}✓ Tingkat penalaran diubah ke: Sedang (Medium effort){RESET}\n")
+            return "medium"
+        else:
+            print(f"  {DIM}Tingkat penalaran tidak diubah.{RESET}\n")
+            return current_effort
+    except (EOFError, KeyboardInterrupt):
+        print(f"  {DIM}Dibatalkan.{RESET}\n")
+        return current_effort
+
+def handle_model_command(config):
+    """Interaktif model selector & reasoning selector."""
+    current_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
+    if current_idx >= len(MODELS):
+        current_idx = DEFAULT_MODEL_INDEX
+    render_model_selector(current_idx)
+    try:
+        choice = input(f"\n  {BOLD}{COLOR_USER}Nomor model ❯{RESET} ").strip()
+        if choice == "":
+            print(f"  {DIM}Model tidak diubah.{RESET}\n")
+            return current_idx
+        idx = int(choice) - 1
+        if 0 <= idx < len(MODELS):
+            config["model_index"] = idx
+            m = MODELS[idx]
+            print(f"\n  {GREEN}✓{RESET} Model diubah ke {BOLD}{COLOR_LYRA}{m['name']}{RESET}")
+            if m.get("supports_reasoning"):
+                handle_reasoning_command(config)
+            else:
+                config["reasoning_effort"] = "low"
+            save_config(config)
+            print()
+            return idx
+        else:
+            print(f"  {RED}Nomor tidak valid.{RESET}\n")
+            return current_idx
+    except (ValueError, EOFError):
+        print(f"  {RED}Input tidak valid.{RESET}\n")
+        return current_idx
 
 def render_help():
     """Tampilkan panel bantuan."""
@@ -224,6 +251,7 @@ def render_help():
     
     cmds = [
         ("/model",          "Buka pilihan model AI"),
+        ("/reasoning",      "Pilih tingkat penalaran (cepat / sedang)"),
         ("/project",        "Buat project baru (React, Laravel, PHP, dll.)"),
         ("/clear",          "Bersihkan riwayat percakapan"),
         ("/history",        "Tampilkan ringkasan riwayat chat"),
@@ -244,16 +272,17 @@ def render_help():
 # ─── Stream Response Handler ─────────────────────────────────────────────────
 def stream_ai_response(headers, data, model_info=None):
     """
-    Stream respons AI secara langsung dengan format Markdown di dalam Chat Bubble.
-    Mendukung tampilan proses penalaran (Thinking) yang terpisah secara rapi dari respons utama.
+    Stream respons AI secara langsung tanpa kotak border, dengan format Markdown dan Tabel Grid ala Claude CLI.
     """
     model_name = model_info.get("name", "Lyra") if model_info else "Lyra"
-    model_id = model_info.get("id", "") if model_info else ""
-    is_thinking_model = model_id in ("ivy-3", "lyra-nebula-4", "nexara-4.5") or "think" in model_id
-
-    sp_text = f"🧠 {model_name} sedang berpikir & menganalisis..." if is_thinking_model else "Lyra sedang berpikir..."
-    spinner = Spinner(sp_text)
+    reasoning_effort = data.get("reasoning_effort", "medium")
+    reasoning_label = "cepat" if reasoning_effort == "low" else "sedang"
+    
+    spinner_msg = f"{model_name} (penalaran {reasoning_label}) sedang berpikir..."
+    spinner = Spinner(spinner_msg)
     spinner.start()
+    
+    start_time = time.time()
 
     try:
         response = requests.post(
@@ -272,15 +301,24 @@ def stream_ai_response(headers, data, model_info=None):
     if response.status_code != 200:
         return response.status_code, response.text
 
-    header_printed = False
     thinking_printed = False
     in_thinking_mode = False
 
     full_content = ""
     thinking_buffer = ""
     main_buffer = ""
+    table_buffer = []
     markdown_state = {'in_code': False, 'lang': ''}
     tool_call_detected = False
+
+    def flush_table_buffer():
+        nonlocal table_buffer
+        if table_buffer:
+            tbl_lines = render_markdown_table(table_buffer)
+            for t_line in tbl_lines:
+                print(t_line)
+            sys.stdout.flush()
+            table_buffer = []
 
     try:
         for raw_line in response.iter_lines():
@@ -299,19 +337,19 @@ def stream_ai_response(headers, data, model_info=None):
                 except Exception:
                     continue
 
-                # 1. Explicit reasoning_content dari API
+                # 1. Explicit reasoning chunk dari API
                 if reasoning_chunk:
                     if not thinking_printed:
-                        render_thinking_top()
+                        print(f"\n  {COLOR_DIM}{ITALIC}🧠 Process penalaran ({reasoning_label})...{RESET}")
                         thinking_printed = True
                         in_thinking_mode = True
 
                     thinking_buffer += reasoning_chunk
                     while "\n" in thinking_buffer:
                         line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
-                        rows = format_thinking_line_bubble(line_to_print)
-                        for r in rows:
-                            print(r)
+                        formatted_t = format_clean_thinking_line(line_to_print)
+                        if formatted_t:
+                            print(formatted_t)
                         sys.stdout.flush()
                     continue
 
@@ -323,7 +361,7 @@ def stream_ai_response(headers, data, model_info=None):
                 # 2. Tag <think> dalam teks
                 if "<think>" in full_content and "</think>" not in full_content:
                     if not thinking_printed:
-                        render_thinking_top()
+                        print(f"\n  {COLOR_DIM}{ITALIC}🧠 Process penalaran ({reasoning_label})...{RESET}")
                         thinking_printed = True
                         in_thinking_mode = True
                     
@@ -331,105 +369,76 @@ def stream_ai_response(headers, data, model_info=None):
                     thinking_buffer += think_chunk
                     while "\n" in thinking_buffer:
                         line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
-                        rows = format_thinking_line_bubble(line_to_print)
-                        for r in rows:
-                            print(r)
+                        formatted_t = format_clean_thinking_line(line_to_print)
+                        if formatted_t:
+                            print(formatted_t)
                         sys.stdout.flush()
                     continue
 
-                # 3. Transisi saat tag </think> selesai
-                if in_thinking_mode and "</think>" in full_content:
+                # 3. Transisi saat tag </think> selesai atau sebelum main buffer diprint
+                if thinking_printed and (in_thinking_mode or "</think>" in full_content):
                     if thinking_buffer:
-                        rows = format_thinking_line_bubble(thinking_buffer)
-                        for r in rows:
-                            print(r)
+                        formatted_t = format_clean_thinking_line(thinking_buffer)
+                        if formatted_t:
+                            print(formatted_t)
                         thinking_buffer = ""
-                    render_thinking_bottom()
-                    in_thinking_mode = False
+                    if in_thinking_mode:
+                        in_thinking_mode = False
+                        print()
+                        render_full_divider(COLOR_BORDER)
+                        print()
 
                 # 4. Deteksi awal tool call XML
                 if "<tool_call>" in full_content or tool_call_detected:
                     tool_call_detected = True
                     continue
 
-                # 5. Tutup box thinking sebelum membuka box utama Lyra
-                if in_thinking_mode:
-                    if thinking_buffer:
-                        rows = format_thinking_line_bubble(thinking_buffer)
-                        for r in rows:
-                            print(r)
-                        thinking_buffer = ""
-                    render_thinking_bottom()
-                    in_thinking_mode = False
-
-                # 6. Buka Card AI Lyra Utama
-                if not header_printed:
-                    render_ai_bubble_top()
-                    header_printed = True
-
+                # 5. Render baris konten utama
                 clean_chunk = content_chunk.replace("</think>", "")
                 main_buffer += clean_chunk
+                
                 while "\n" in main_buffer:
                     line_to_print, main_buffer = main_buffer.split("\n", 1)
-                    rows, markdown_state = format_markdown_line_bubble(line_to_print, markdown_state)
-                    for r in rows:
-                        print(r)
+                    stripped_l = line_to_print.strip()
+                    
+                    if stripped_l.startswith("|"):
+                        table_buffer.append(line_to_print)
+                    else:
+                        flush_table_buffer()
+                        row, markdown_state = format_markdown_line(line_to_print, markdown_state)
+                        print(row)
                     sys.stdout.flush()
 
         # Flush sisa buffer jika ada
-        if in_thinking_mode:
-            if thinking_buffer:
-                rows = format_thinking_line_bubble(thinking_buffer)
-                for r in rows:
-                    print(r)
-            render_thinking_bottom()
-            in_thinking_mode = False
+        if thinking_buffer:
+            formatted_t = format_clean_thinking_line(thinking_buffer)
+            if formatted_t:
+                print(formatted_t)
 
         if main_buffer and not tool_call_detected:
-            if not header_printed:
-                render_ai_bubble_top()
-                header_printed = True
-            rows, markdown_state = format_markdown_line_bubble(main_buffer, markdown_state)
-            for r in rows:
-                print(r)
+            stripped_l = main_buffer.strip()
+            if stripped_l.startswith("|"):
+                table_buffer.append(main_buffer)
+                flush_table_buffer()
+            else:
+                flush_table_buffer()
+                row, markdown_state = format_markdown_line(main_buffer, markdown_state)
+                print(row)
             sys.stdout.flush()
+        else:
+            flush_table_buffer()
 
-        if header_printed:
-            render_ai_bubble_bottom()
+        elapsed = time.time() - start_time
+        if not tool_call_detected and full_content.strip():
+            print(f"\n  {COLOR_DIM}* Selesai dalam {elapsed:.1f}s{RESET}")
 
         return 200, full_content
 
     except Exception as e:
-        if in_thinking_mode:
-            render_thinking_bottom()
-        if header_printed:
-            render_ai_bubble_bottom()
+        flush_table_buffer()
         return 0, f"Error streaming: {e}"
 
 # ─── Slash Command Handlers ───────────────────────────────────────────────────
-def handle_model_command(config):
-    """Interaktif model selector."""
-    current_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
-    render_model_selector(current_idx)
-    try:
-        choice = input(f"\n  {BOLD}{COLOR_USER}Nomor model ❯{RESET} ").strip()
-        if choice == "":
-            print(f"  {DIM}Model tidak diubah.{RESET}\n")
-            return current_idx
-        idx = int(choice) - 1
-        if 0 <= idx < len(MODELS):
-            config["model_index"] = idx
-            save_config(config)
-            m = MODELS[idx]
-            print(f"\n  {GREEN}✓{RESET} Model diubah ke {BOLD}{COLOR_LYRA}{m['name']}{RESET}\n")
-            return idx
-        else:
-            print(f"  {RED}Nomor tidak valid.{RESET}\n")
-            return current_idx
-    except (ValueError, EOFError):
-        print(f"  {RED}Input tidak valid.{RESET}\n")
-        return current_idx
-
 def handle_project_command(cwd):
     """Wizard pembuatan project baru."""
     print(f"\n  {BOLD}{COLOR_LYRA}✦ Buat Project Baru{RESET}\n")
@@ -451,7 +460,6 @@ def handle_project_command(cwd):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    # Load config & API key
     config  = load_config()
     api_key = get_api_key(config=config)
 
@@ -460,33 +468,29 @@ def main():
         "Content-Type":  "application/json",
     }
 
-    model_idx  = config.get("model_index", DEFAULT_MODEL_INDEX)
-    model_info = MODELS[model_idx]
+    model_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
+    if model_idx >= len(MODELS):
+        model_idx = DEFAULT_MODEL_INDEX
+        config["model_index"] = model_idx
+        save_config(config)
 
-    # Riwayat chat
+    reasoning_effort = config.get("reasoning_effort", "medium")
+
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    # Direktori kerja aktif (bisa diubah dengan /cd)
     active_cwd = os.getcwd()
 
-    # ── Tampilan awal ─────────────────────────────────────────────────────────
+    # Render Logo Gradasi Amagi & Header
     print_logo()
-
-    # Masked API key
-    masked_key = api_key[:8] + "•" * (len(api_key) - 12) + api_key[-4:] if len(api_key) > 12 else "•" * len(api_key)
-    print(render_welcome_panel(model_info["name"], masked_key))
-
-    version_color = rgb_to_ansi(*hex_to_rgb("#A78BFA"))
-    print(f"\n  {version_color}Lyra CLI v2.0{RESET}  {DIM}·{RESET}  {DIM}Ketik /help untuk bantuan{RESET}\n")
+    render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd)
 
     # ── Loop utama ────────────────────────────────────────────────────────────
     while True:
         try:
-            cwd_short = active_cwd.replace(os.path.expanduser("~"), "~")
-            prompt_str = (
-                f"  {DIM}{cwd_short}{RESET}\n"
-                f"  {BOLD}{COLOR_USER}❯{RESET} "
-            )
+            model_info = MODELS[model_idx]
+            current_effort = config.get("reasoning_effort", "medium")
+
+            render_full_divider(COLOR_BORDER)
+            prompt_str = f"  {BOLD}{COLOR_USER}❯{RESET} "
             user_input = input(prompt_str).strip()
 
             if not user_input:
@@ -504,6 +508,11 @@ def main():
             elif user_input.lower() == "/model":
                 model_idx  = handle_model_command(config)
                 model_info = MODELS[model_idx]
+                reasoning_effort = config.get("reasoning_effort", "medium")
+                continue
+
+            elif user_input.lower() in ("/reasoning", "/effort"):
+                reasoning_effort = handle_reasoning_command(config)
                 continue
 
             elif user_input.lower() == "/project":
@@ -559,13 +568,17 @@ def main():
 
             # ── Kirim ke AI ───────────────────────────────────────────────────
             messages.append({"role": "user", "content": user_input})
+            print()
 
             while True:
-                current_model = MODELS[model_idx]["id"]
+                current_model  = MODELS[model_idx]["id"]
+                current_effort = config.get("reasoning_effort", "medium")
+
                 data = {
-                    "model":       current_model,
-                    "messages":    messages,
-                    "temperature": 0.2,
+                    "model":            current_model,
+                    "messages":         messages,
+                    "temperature":      0.2,
+                    "reasoning_effort": current_effort,
                 }
 
                 status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
@@ -601,7 +614,8 @@ def main():
                         print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
                         break
 
-                    # Dispatch tool (permission box akan muncul otomatis jika perlu)
+                    print(f"  {DIM}● Menjalankan tool '{func_name}'...{RESET}")
+
                     if func_name == "list_directory":
                         result = list_directory(
                             args.get("path", "."),
@@ -633,13 +647,8 @@ def main():
                         "role":    "user",
                         "content": f"[Hasil Tool '{func_name}']\n{result}",
                     })
-                    continue  # Lanjutkan respons AI dengan hasil tool
-
+                    continue
                 else:
-                    break
-                    print(f"\n  {RED}Kesalahan: {e}{RESET}\n")
-                    if messages[-1]["role"] == "user":
-                        messages.pop()
                     break
 
         except KeyboardInterrupt:

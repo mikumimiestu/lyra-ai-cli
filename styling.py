@@ -162,21 +162,72 @@ def str_width(text):
 
 # ─── Permission Box UI ────────────────────────────────────────────────────────
 def render_permission_box(title, details):
-    """Render box konfirmasi izin eksekusi yang rapi dan presisi."""
-    w = min(get_terminal_width() - 8, 76)
+    """Render box konfirmasi izin eksekusi yang rapi dan presisi, menangani multi-line script."""
+    term_w = get_terminal_width()
+    w = max(65, min(term_w - 6, 105))
+    content_w = w - 6
+    
     B, T, A, Y, R, D = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, YELLOW, RESET, COLOR_DIM
 
     title_str = f" 🛡️  {BOLD}{Y}{title}{R} "
     pad_title = max(0, w - 2 - str_width(title_str))
     
-    print(f"\n  {B}╭──{title_str}{B}{'─' * pad_title}╮{R}")
+    top_b = "─" * pad_title
+    print(f"\n  {B}╭──{title_str}{B}{top_b}╮{R}")
+
     for k, v in details.items():
-        k_str = f"{D}{k:<10}: {R}"
-        v_str = f"{BOLD}{WHITE}{v}{R}"
-        vis_len = str_width(k_str + v_str)
-        pad = max(0, w - 4 - vis_len)
-        print(f"  {B}│{R}  {k_str}{v_str}{' ' * pad}  {B}│{R}")
-    print(f"  {B}╰{'─' * w}╯{R}")
+        v_str = str(v)
+        if "\n" in v_str:
+            k_line = f"{D}{k:<10}:{R}"
+            vis_k = str_width(k_line)
+            pad_k = max(0, content_w - vis_k)
+            sp_k = " " * pad_k
+            print(f"  {B}│{R}  {k_line}{sp_k}  {B}│{R}")
+            
+            v_lines = v_str.split("\n")
+            for sub_l in v_lines:
+                if not sub_l.strip():
+                    continue
+                highlighted = highlight_syntax(sub_l)
+                plain_sub = strip_ansi(sub_l)
+                if str_width(plain_sub) > content_w - 4:
+                    wrapped_subs = wrap_text_display_width(highlighted, content_w - 4)
+                else:
+                    wrapped_subs = [highlighted]
+                
+                for wl in wrapped_subs:
+                    vis_len = str_width(wl)
+                    pad = max(0, content_w - vis_len - 4)
+                    sp = " " * pad
+                    print(f"  {B}│{R}      {wl}{sp}  {B}│{R}")
+        else:
+            k_str = f"{D}{k:<10}: {R}"
+            vis_k_len = 12
+            val_max = content_w - vis_k_len
+            v_plain = strip_ansi(v_str)
+            
+            if str_width(v_plain) > val_max:
+                wrapped_vals = wrap_text_display_width(v_str, val_max)
+                for idx, wl in enumerate(wrapped_vals):
+                    if idx == 0:
+                        vis_len = str_width(k_str + wl)
+                        pad = max(0, content_w - vis_len)
+                        sp = " " * pad
+                        print(f"  {B}│{R}  {k_str}{BOLD}{WHITE}{wl}{R}{sp}  {B}│{R}")
+                    else:
+                        indent_pad = " " * 12
+                        vis_len = str_width(indent_pad + wl)
+                        pad = max(0, content_w - vis_len)
+                        sp = " " * pad
+                        print(f"  {B}│{R}  {indent_pad}{BOLD}{WHITE}{wl}{R}{sp}  {B}│{R}")
+            else:
+                vis_len = str_width(k_str + f"{BOLD}{WHITE}{v_str}{R}")
+                pad = max(0, content_w - vis_len)
+                sp = " " * pad
+                print(f"  {B}│{R}  {k_str}{BOLD}{WHITE}{v_str}{R}{sp}  {B}│{R}")
+
+    bot_b = "─" * w
+    print(f"  {B}╰{bot_b}╯{R}")
 
 
 # ─── Markdown Renderer & Code Highlighting ────────────────────────────────────
@@ -250,19 +301,19 @@ def format_markdown_line(line, state):
     # Headers
     if line.startswith("# "):
         header = line[2:].strip()
-        return f"\n{BOLD}{COLOR_LYRA}✦ {header.upper()}{RESET}\n{COLOR_BORDER}{'─' * len(header)}{RESET}", state
+        return f"\n  {BOLD}{COLOR_LYRA}✦ {header.upper()}{RESET}\n  {COLOR_BORDER}{'─' * max(10, len(header) + 4)}{RESET}", state
     elif line.startswith("## "):
         header = line[3:].strip()
-        return f"\n{BOLD}{COLOR_TITLE}# {header}{RESET}", state
+        return f"\n  {BOLD}{COLOR_TITLE}# {header}{RESET}", state
     elif line.startswith("### "):
         header = line[4:].strip()
-        return f"{BOLD}{COLOR_ACCENT}▶ {header}{RESET}", state
+        return f"\n  {BOLD}{COLOR_ACCENT}▶ {header}{RESET}", state
 
     # Lists
     if re.match(r'^\s*[-*+]\s+', line):
         content = re.sub(r'^\s*[-*+]\s+', '', line)
         formatted = format_inline_markdown(content)
-        return f"  {COLOR_LYRA}•{RESET} {formatted}", state
+        return f"  {COLOR_LYRA}●{RESET} {formatted}", state
     elif re.match(r'^\s*\d+\.\s+', line):
         match = re.match(r'^\s*(\d+)\.\s+(.*)', line)
         if match:
@@ -273,16 +324,16 @@ def format_markdown_line(line, state):
     # Blockquotes
     if line.startswith("> "):
         content = format_inline_markdown(line[2:])
-        return f"{COLOR_DIM}│ {ITALIC}{content}{RESET}", state
+        return f"  {COLOR_DIM}│ {ITALIC}{content}{RESET}", state
 
     # Horizontal Rule
     if stripped in ("---", "***", "___"):
-        w = min(get_terminal_width() - 8, 72)
-        return f"{COLOR_BORDER}{'─' * w}{RESET}", state
+        w = min(get_terminal_width() - 4, 100)
+        return f"  {COLOR_BORDER}{'─' * w}{RESET}", state
 
     # Regular line
     formatted = format_inline_markdown(line)
-    return f"{WHITE}{formatted}{RESET}", state
+    return f"  {WHITE}{formatted}{RESET}", state
 
 
 def wrap_text_display_width(text, max_width):
@@ -322,103 +373,207 @@ def wrap_text_display_width(text, max_width):
     return lines
 
 
-# ─── Chat Bubble UI Helpers ───────────────────────────────────────────────────
-def render_ai_bubble_top():
-    """Render bagian atas card AI Lyra secara presisi."""
-    w = min(get_terminal_width() - 8, 76)
-    B, L, R = COLOR_BORDER, COLOR_LYRA, RESET
-    clean_title = " ✦ Lyra "
-    pad_title = max(0, w - 2 - str_width(clean_title))
-    
-    print(f"\n  {B}╭──{L}{BOLD}{clean_title}{R}{B}{'─' * pad_title}╮{R}")
+# ─── Markdown Table Grid Renderer ─────────────────────────────────────────────
 
+def parse_markdown_table(lines):
+    rows = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        parts = [p.strip() for p in stripped.split("|")[1:-1]]
+        if not parts:
+            continue
+        # Skip line pemisah markdown seperti |---|---| atau |:---|---:|
+        if all(re.match(r'^:?-+:?$', p) for p in parts if p):
+            continue
+        rows.append(parts)
+    if not rows:
+        return [], []
+    headers = rows[0]
+    data_rows = rows[1:]
+    return headers, data_rows
+
+
+def render_markdown_table(table_lines, max_width=None):
+    """
+    Render tabel markdown sebagai tabel grid presisi tinggi ala Claude CLI terminal.
+    Mendukung wrapping isi sel, alignment, dan batas Unicode box drawing.
+    """
+    headers, rows = parse_markdown_table(table_lines)
+    if not headers:
+        return []
+
+    num_cols = len(headers)
+    term_w = max_width if max_width else get_terminal_width()
+    avail_w = max(40, term_w - 6)
+    
+    border_overhead = (3 * num_cols) + 1
+    usable_w = max(num_cols * 10, avail_w - border_overhead)
+
+    # Hitung lebar maksimal tiap kolom
+    max_lens = [str_width(h) for h in headers]
+    for row in rows:
+        for i in range(num_cols):
+            val = row[i] if i < len(row) else ""
+            max_lens[i] = max(max_lens[i], str_width(val))
+
+    total_req = sum(max_lens)
+    if total_req <= usable_w:
+        col_widths = list(max_lens)
+    else:
+        col_widths = []
+        for l in max_lens:
+            w = max(10, int((l / max(1, total_req)) * usable_w))
+            col_widths.append(w)
+
+    def wrap_cell(text, width):
+        if str_width(text) <= width:
+            return [format_inline_markdown(text)]
+        words = text.split(" ")
+        lines = []
+        cur_words = []
+        cur_plain = ""
+        for w in words:
+            test_plain = f"{cur_plain} {w}".strip() if cur_plain else w
+            if str_width(strip_ansi(format_inline_markdown(test_plain))) <= width:
+                cur_words.append(w)
+                cur_plain = test_plain
+            else:
+                if cur_words:
+                    lines.append(format_inline_markdown(" ".join(cur_words)))
+                if str_width(w) > width:
+                    sub = ""
+                    for ch in w:
+                        if str_width(sub + ch) <= width:
+                            sub += ch
+                        else:
+                            lines.append(format_inline_markdown(sub))
+                            sub = ch
+                    cur_words = [sub] if sub else []
+                    cur_plain = sub
+                else:
+                    cur_words = [w]
+                    cur_plain = w
+        if cur_words:
+            lines.append(format_inline_markdown(" ".join(cur_words)))
+        return lines if lines else [""]
+
+    B = COLOR_BORDER
+    R = RESET
+
+    top_line = f"  {B}┌" + "┬".join("─" * (w + 2) for w in col_widths) + f"┐{R}"
+    sep_line = f"  {B}├" + "┼".join("─" * (w + 2) for w in col_widths) + f"┤{R}"
+    bot_line = f"  {B}└" + "┴".join("─" * (w + 2) for w in col_widths) + f"┘{R}"
+
+    output_lines = [top_line]
+
+    def render_row_block(row_cells, is_header=False):
+        wrapped_cells = []
+        max_h = 1
+        for i in range(num_cols):
+            val = row_cells[i] if i < len(row_cells) else ""
+            w_lines = wrap_cell(val, col_widths[i])
+            wrapped_cells.append(w_lines)
+            max_h = max(max_h, len(w_lines))
+
+        row_lines = []
+        for h in range(max_h):
+            line_parts = []
+            for i in range(num_cols):
+                cell_line = wrapped_cells[i][h] if h < len(wrapped_cells[i]) else ""
+                vis_w = str_width(cell_line)
+                pad = max(0, col_widths[i] - vis_w)
+                if is_header:
+                    cell_str = f" {BOLD}{COLOR_TITLE}{cell_line}{RESET}{' ' * pad} "
+                else:
+                    cell_str = f" {cell_line}{' ' * pad} "
+                line_parts.append(cell_str)
+            row_lines.append(f"  {B}│{R}" + f"{B}│{R}".join(line_parts) + f"{B}│{R}")
+        return row_lines
+
+    output_lines.extend(render_row_block(headers, is_header=True))
+    output_lines.append(sep_line)
+
+    for idx, r in enumerate(rows):
+        output_lines.extend(render_row_block(r, is_header=False))
+        if idx < len(rows) - 1:
+            output_lines.append(sep_line)
+
+    output_lines.append(bot_line)
+    return output_lines
+
+
+# ─── Full-Page Header & Footer Helpers ─────────────────────────────────────────
+
+def render_header(model_name, reasoning_effort, active_cwd):
+    """Render top header ala Claude CLI dengan daftar perintah utama."""
+    home_dir = os.path.expanduser("~")
+    cwd_short = active_cwd.replace(home_dir, "~")
+    
+    reasoning_label = "penalaran cepat" if reasoning_effort == "low" else "penalaran sedang"
+    
+    header_title = f"{BOLD}{COLOR_LYRA}Lyra CLI v2.0{RESET}"
+    header_sub   = f"{COLOR_DIM}Model    : {RESET}{BOLD}{WHITE}{model_name}{RESET} {COLOR_DIM}({reasoning_label}) · AstByte AI{RESET}"
+    header_path  = f"{COLOR_DIM}Direktori: {RESET}{COLOR_TITLE}{cwd_short}{RESET}"
+    
+    print(f"\n  {header_title}")
+    print(f"  {header_sub}")
+    print(f"  {header_path}\n")
+
+    print(f"  {BOLD}{COLOR_ACCENT}Perintah Utama:{RESET}")
+    print(f"    {BOLD}{YELLOW}/model{RESET}      {COLOR_DIM}- Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5){RESET}")
+    print(f"    {BOLD}{YELLOW}/reasoning{RESET}  {COLOR_DIM}- Atur tingkat penalaran (cepat / sedang){RESET}")
+    print(f"    {BOLD}{YELLOW}/project{RESET}    {COLOR_DIM}- Wizard pembuat project baru (React, Next.js, Laravel, FastAPI...){RESET}")
+    print(f"    {BOLD}{YELLOW}/clear{RESET}      {COLOR_DIM}- Bersihkan riwayat chat{RESET}")
+    print(f"    {BOLD}{YELLOW}/help{RESET}       {COLOR_DIM}- Lihat semua perintah yang tersedia{RESET}")
+    print(f"    {BOLD}{YELLOW}exit{RESET}        {COLOR_DIM}- Keluar dari aplikasi{RESET}\n")
+
+
+def render_full_divider(color=COLOR_BORDER):
+    """Render garis pembatas panjang dari ujung ke ujung."""
+    w = max(40, get_terminal_width() - 4)
+    print(f"  {color}{'─' * w}{RESET}")
+
+
+def render_footer_bar():
+    """Render bottom toolbar ala Claude Code CLI."""
+    w = max(40, get_terminal_width() - 4)
+    sep = f"{COLOR_BORDER}{'─' * w}{RESET}"
+    status_text = f"{COLOR_DIM}⏸ manual mode on · /model pilih model · /reasoning tingkat penalaran · /help bantuan{RESET}"
+    print(f"\n  {sep}")
+    print(f"  {status_text}\n")
+
+
+def format_clean_thinking_line(line):
+    """Format baris penalaran tanpa box border."""
+    plain = strip_ansi(line)
+    if not plain.strip():
+        return ""
+    return f"  {COLOR_DIM}{ITALIC}{plain}{RESET}"
+
+
+# ─── Legacy Chat Bubble UI Helpers (Compatibility) ────────────────────────────
+def render_ai_bubble_top():
+    pass
 
 def render_ai_bubble_bottom():
-    """Render bagian bawah card AI Lyra secara presisi."""
-    w = min(get_terminal_width() - 8, 76)
-    B, R = COLOR_BORDER, RESET
-    print(f"  {B}╰{'─' * w}╯{R}\n")
-
+    pass
 
 def format_markdown_line_bubble(line, state, width=None):
-    """
-    Format baris Markdown dan bungkus teks (word wrap) agar 100% presisi terbingkai di dalam card AI.
-    Returns: (list_of_formatted_rows, state)
-    """
-    if width is None:
-        width = min(get_terminal_width() - 8, 76)
-    
-    content_w = width - 4  # 2 spasi kiri margin, 2 spasi kanan margin
+    row, state = format_markdown_line(line, state)
+    return [row], state
 
-    stripped = line.strip()
-
-    # Handling Code block borders & inner lines
-    if stripped.startswith("```"):
-        formatted, state = format_markdown_line(line, state)
-        vis_len = str_width(formatted)
-        pad = max(0, content_w - vis_len)
-        return [f"  {COLOR_BORDER}│{RESET}  {formatted}{' ' * pad}  {COLOR_BORDER}│{RESET}"], state
-
-    if state['in_code']:
-        formatted, state = format_markdown_line(line, state)
-        vis_len = str_width(formatted)
-        pad = max(0, content_w - vis_len)
-        return [f"  {COLOR_BORDER}│{RESET}  {formatted}{' ' * pad}  {COLOR_BORDER}│{RESET}"], state
-
-    # Format baris dengan markdown renderer terlebih dahulu
-    formatted, state = format_markdown_line(line, state)
-
-    # Cek apakah lebar tampilan melebihi content_w
-    if str_width(formatted) > content_w and not line.startswith(("#", "```", "---")):
-        wrapped = wrap_text_display_width(formatted, content_w)
-        rows = []
-        for w_line in wrapped:
-            vis_len = str_width(w_line)
-            pad = max(0, content_w - vis_len)
-            rows.append(f"  {COLOR_BORDER}│{RESET}  {w_line}{' ' * pad}  {COLOR_BORDER}│{RESET}")
-        return rows, state
-    else:
-        vis_len = str_width(formatted)
-        pad = max(0, content_w - vis_len)
-        return [f"  {COLOR_BORDER}│{RESET}  {formatted}{' ' * pad}  {COLOR_BORDER}│{RESET}"], state
-
-
-# ─── Thinking Card UI Helpers ─────────────────────────────────────────────────
 def render_thinking_top():
-    """Render bagian atas card Thinking Process."""
-    w = min(get_terminal_width() - 8, 76)
-    D, R = COLOR_DIM, RESET
-    clean_title = " 🧠 Thinking Process "
-    pad_title = max(0, w - 2 - str_width(clean_title))
-    
-    print(f"\n  {D}╭──{BOLD}{COLOR_USER}{clean_title}{R}{D}{'─' * pad_title}╮{R}")
-
+    print(f"  {COLOR_DIM}{ITALIC}🧠 Process penalaran...{RESET}")
 
 def render_thinking_bottom():
-    """Render bagian bawah card Thinking Process."""
-    w = min(get_terminal_width() - 8, 76)
-    D, R = COLOR_DIM, RESET
-    print(f"  {D}╰{'─' * w}╯{R}")
-
+    print()
 
 def format_thinking_line_bubble(line, width=None):
-    """Format baris penalaran (thinking) dalam warna dim & italic."""
-    if width is None:
-        width = min(get_terminal_width() - 8, 76)
-    content_w = width - 4
-    plain_text = strip_ansi(line)
-    if str_width(plain_text) > content_w:
-        wrapped = wrap_text_display_width(plain_text, content_w)
-        rows = []
-        for wl in wrapped:
-            vis_len = str_width(wl)
-            pad = max(0, content_w - vis_len)
-            rows.append(f"  {COLOR_DIM}│{RESET}  {COLOR_DIM}{ITALIC}{wl}{RESET}{' ' * pad}  {COLOR_DIM}│{RESET}")
-        return rows
-    else:
-        vis_len = str_width(plain_text)
-        pad = max(0, content_w - vis_len)
-        return [f"  {COLOR_DIM}│{RESET}  {COLOR_DIM}{ITALIC}{plain_text}{RESET}{' ' * pad}  {COLOR_DIM}│{RESET}"]
+    formatted = format_clean_thinking_line(line)
+    return [formatted] if formatted else []
+
 
 
 

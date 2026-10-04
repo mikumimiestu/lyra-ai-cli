@@ -54,46 +54,54 @@ done
 
 # 4. Set up Virtual Environment
 echo -e "${CYAN}Setting up virtual environment...${RESET}"
+rm -rf "$INSTALL_DIR/venv"
 python3 -m venv "$INSTALL_DIR/venv"
 
 echo -e "${CYAN}Installing dependencies (requests)...${RESET}"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip &>/dev/null || true
-"$INSTALL_DIR/venv/bin/pip" install requests
+if [ -f "$INSTALL_DIR/venv/bin/python3" ]; then
+    "$INSTALL_DIR/venv/bin/pip" install --upgrade pip &>/dev/null || true
+    "$INSTALL_DIR/venv/bin/pip" install requests
+elif [ -f "$INSTALL_DIR/venv/bin/python" ]; then
+    "$INSTALL_DIR/venv/bin/pip" install --upgrade pip &>/dev/null || true
+    "$INSTALL_DIR/venv/bin/pip" install requests
+else
+    pip3 install requests --user &>/dev/null || true
+fi
 
 # 5. Create wrapper script
+PYTHON_EXEC="$INSTALL_DIR/venv/bin/python3"
+if [ ! -f "$PYTHON_EXEC" ]; then
+    PYTHON_EXEC="$INSTALL_DIR/venv/bin/python"
+fi
+if [ ! -f "$PYTHON_EXEC" ]; then
+    PYTHON_EXEC="$(which python3)"
+fi
+
 WRAPPER_CONTENT=$(cat <<EOF
 #!/usr/bin/env bash
-exec "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/app.py" "\$@"
+if [ -f "$INSTALL_DIR/venv/bin/python3" ]; then
+    exec "$INSTALL_DIR/venv/bin/python3" "$INSTALL_DIR/app.py" "\$@"
+elif [ -f "$INSTALL_DIR/venv/bin/python" ]; then
+    exec "$INSTALL_DIR/venv/bin/python" "$INSTALL_DIR/app.py" "\$@"
+else
+    exec python3 "$INSTALL_DIR/app.py" "\$@"
+fi
 EOF
 )
 
 # Find where to install the executable
-BIN_DIR=""
-if [ -d "$HOME/.local/bin" ]; then
-    BIN_DIR="$HOME/.local/bin"
-elif [ -d "$HOME/bin" ]; then
-    BIN_DIR="$HOME/bin"
-elif [ -w "/usr/local/bin" ]; then
-    BIN_DIR="/usr/local/bin"
-else
-    # Default fallback to ~/.local/bin
-    BIN_DIR="$HOME/.local/bin"
-    mkdir -p "$BIN_DIR"
-fi
+mkdir -p "$HOME/.local/bin"
+echo "$WRAPPER_CONTENT" > "$HOME/.local/bin/amagi"
+chmod +x "$HOME/.local/bin/amagi"
 
-echo -e "${CYAN}Installing 'amagi' command wrapper to $BIN_DIR/amagi...${RESET}"
-echo "$WRAPPER_CONTENT" > "$BIN_DIR/amagi"
-chmod +x "$BIN_DIR/amagi"
+if [ -w "/usr/local/bin" ]; then
+    echo -e "${CYAN}Installing 'amagi' command wrapper to /usr/local/bin/amagi...${RESET}"
+    echo "$WRAPPER_CONTENT" > "/usr/local/bin/amagi"
+    chmod +x "/usr/local/bin/amagi"
+fi
 
 echo -e "\n${GREEN}✓ Amagi CLI successfully installed!${RESET}"
 echo -e "${PURPLE}==================================================${RESET}"
-echo -e "Untuk menjalankannya, silakan ketik perintah berikut:"
+echo -e "Untuk menjalankannya, silakan buka terminal baru dan ketik:"
 echo -e "  ${BOLD}${BLUE}amagi${RESET}"
 echo -e "${PURPLE}==================================================${RESET}"
-
-# PATH warning if BIN_DIR is not in PATH
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-    echo -e "${YELLOW}Peringatan: Direktori $BIN_DIR tidak ada di dalam PATH Anda.${RESET}"
-    echo -e "Silakan tambahkan baris berikut ke file shell profile Anda (~/.zshrc atau ~/.bashrc):"
-    echo -e "  ${BOLD}export PATH=\"\$PATH:$BIN_DIR\"${RESET}"
-fi
