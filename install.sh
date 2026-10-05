@@ -37,20 +37,22 @@ mkdir -p "$INSTALL_DIR"
 FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "version.txt")
 LOCAL_MODE=false
 
-if [ -f "app.py" ] && [ -f "styling.py" ]; then
-    echo -e "${YELLOW}Running in Local installation mode...${RESET}"
-    LOCAL_MODE=true
+if [ -d "dist" ] && [ -f "dist/app.py" ]; then
+    echo -e "${YELLOW}Installing protected build from dist/...${RESET}"
+    cp -r dist/* "$INSTALL_DIR/"
+    [ -f "version.txt" ] && cp "version.txt" "$INSTALL_DIR/version.txt"
+else
+    for file in "${FILES[@]}"; do
+        if [ "$LOCAL_MODE" = true ]; then
+            echo -e "Copying $file..."
+            cp "$file" "$INSTALL_DIR/$file"
+        else
+            echo -e "Downloading $file from GitHub..."
+            curl -sSf -o "$INSTALL_DIR/$file" "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
+        fi
+    done
 fi
 
-for file in "${FILES[@]}"; do
-    if [ "$LOCAL_MODE" = true ]; then
-        echo -e "Copying $file..."
-        cp "$file" "$INSTALL_DIR/$file"
-    else
-        echo -e "Downloading $file from GitHub..."
-        curl -sSf -o "$INSTALL_DIR/$file" "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
-    fi
-done
 
 # 4. Set up Virtual Environment
 echo -e "${CYAN}Setting up virtual environment...${RESET}"

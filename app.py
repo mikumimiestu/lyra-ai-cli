@@ -30,7 +30,6 @@ from config import (
 API_URL = "https://authx.astbyte.com/v1/chat/completions"
 
 # ─── Model Definitions ────────────────────────────────────────────────────────
-# ─── Model Definitions ────────────────────────────────────────────────────────
 MODELS = [
     {
         "id":                 "lyra-luma-flash",
