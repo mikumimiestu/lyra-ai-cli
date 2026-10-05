@@ -197,7 +197,7 @@ import re
 CODE_BG = rgb_bg(30, 41, 59) if IS_DARK else rgb_bg(241, 245, 249)
 INLINE_CODE_BG = rgb_bg(39, 39, 42) if IS_DARK else rgb_bg(228, 228, 231)
 
-KEYWORDS_PAT = r'\b(def|class|import|from|return|if|else|elif|for|while|try|except|const|let|var|function|async|await|export|default|require|echo|public|private|protected|fn|struct|enum|interface|type|nil|None|True|False|null|true|false)\b'
+KEYWORDS_PAT = r'\b(?:def|class|import|from|return|if|else|elif|for|while|try|except|const|let|var|function|async|await|export|default|require|echo|public|private|protected|fn|struct|enum|interface|type|nil|None|True|False|null|true|false)\b'
 SYNTAX_PATTERN = re.compile(rf'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`)|({KEYWORDS_PAT})|(\b\d+\b)')
 
 def highlight_syntax(code_line, lang=""):
@@ -210,7 +210,10 @@ def highlight_syntax(code_line, lang=""):
         return f"{COLOR_DIM}{ITALIC}{code_line}{RESET}"
 
     def replacer(match):
-        s_group, k_group, n_group = match.groups()
+        groups = match.groups()
+        s_group = groups[0] if len(groups) > 0 else None
+        k_group = groups[1] if len(groups) > 1 else None
+        n_group = groups[2] if len(groups) > 2 else None
         if s_group is not None:
             return f"{GREEN}{s_group}{RESET}"
         elif k_group is not None:
@@ -218,6 +221,7 @@ def highlight_syntax(code_line, lang=""):
         elif n_group is not None:
             return f"{YELLOW}{n_group}{RESET}"
         return match.group(0)
+
 
     return SYNTAX_PATTERN.sub(replacer, code_line)
 
