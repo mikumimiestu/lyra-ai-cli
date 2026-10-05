@@ -197,10 +197,11 @@ import re
 CODE_BG = rgb_bg(30, 41, 59) if IS_DARK else rgb_bg(241, 245, 249)
 INLINE_CODE_BG = rgb_bg(39, 39, 42) if IS_DARK else rgb_bg(228, 228, 231)
 
-KEYWORDS = r'\b(def|class|import|from|return|if|else|elif|for|while|try|except|const|let|var|function|async|await|export|default|require|echo|public|private|protected|fn|struct|enum|interface|type|nil|None|True|False|null|true|false)\b'
+KEYWORDS_PAT = r'\b(def|class|import|from|return|if|else|elif|for|while|try|except|const|let|var|function|async|await|export|default|require|echo|public|private|protected|fn|struct|enum|interface|type|nil|None|True|False|null|true|false)\b'
+SYNTAX_PATTERN = re.compile(rf'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`)|({KEYWORDS_PAT})|(\b\d+\b)')
 
 def highlight_syntax(code_line, lang=""):
-    """Syntax highlighting sederhana menggunakan ANSI."""
+    """Syntax highlighting presisi tanpa merusak ANSI escape sequence."""
     if not code_line:
         return ""
     
@@ -208,14 +209,18 @@ def highlight_syntax(code_line, lang=""):
     if code_line.strip().startswith(("#", "//", "/*", "*")):
         return f"{COLOR_DIM}{ITALIC}{code_line}{RESET}"
 
-    line = code_line
-    # Highlight strings
-    line = re.sub(r'("(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|[^`\\])*`)', rf"{GREEN}\1{RESET}", line)
-    # Highlight keywords
-    line = re.sub(KEYWORDS, rf"{CYAN}{BOLD}\1{RESET}", line)
-    # Highlight numbers
-    line = re.sub(r'\b(\d+)\b', rf"{YELLOW}\1{RESET}", line)
-    return line
+    def replacer(match):
+        s_group, k_group, n_group = match.groups()
+        if s_group is not None:
+            return f"{GREEN}{s_group}{RESET}"
+        elif k_group is not None:
+            return f"{CYAN}{BOLD}{k_group}{RESET}"
+        elif n_group is not None:
+            return f"{YELLOW}{n_group}{RESET}"
+        return match.group(0)
+
+    return SYNTAX_PATTERN.sub(replacer, code_line)
+
 
 
 def format_inline_markdown(text):
