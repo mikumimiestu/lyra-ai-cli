@@ -2,10 +2,10 @@ from setuptools import setup
 
 setup(
     name="amagi-cli",
-    version="2.1.1",
-    description="AstByte Lyra CLI chat client with agentic capabilities and auto-update support",
+    version="2.2.0",
+    description="AstByte Lyra CLI chat client with memory, system time, background reminders, and agentic capabilities",
 
-    py_modules=["app", "styling", "spinner", "tools", "config"],
+    py_modules=["app", "styling", "spinner", "tools", "config", "memory", "reminder"],
 
     install_requires=[
         "requests",

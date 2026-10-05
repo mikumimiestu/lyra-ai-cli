@@ -21,7 +21,7 @@ def build():
     cmd = [
         python_bin, "-m", "pyarmor.cli", "gen",
         "-O", "dist",
-        "app.py", "styling.py", "spinner.py", "tools.py", "config.py"
+        "app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py"
     ]
     result = subprocess.run(cmd)
     if result.returncode == 0:

@@ -79,11 +79,11 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ API Key berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
-FILES_TO_UPDATE = ["app.py", "styling.py", "spinner.py", "tools.py", "config.py", "setup.py", "version.txt"]
+FILES_TO_UPDATE = ["app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py", "setup.py", "version.txt"]
 
 def parse_version_tuple(v_str: str):
     """Konversi string versi '2.1.0' atau 'v2.1.0' menjadi tuple angka (2, 1, 0)"""

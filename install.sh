@@ -34,24 +34,19 @@ mkdir -p "$INSTALL_DIR"
 # 3. Retrieve files
 # If files exist in current directory, we copy them (Local Dev Mode)
 # Otherwise, we download them from raw.githubusercontent.com
-FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "version.txt")
+FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "memory.py" "reminder.py" "version.txt")
 LOCAL_MODE=false
 
-if [ -d "dist" ] && [ -f "dist/app.py" ]; then
-    echo -e "${YELLOW}Installing protected build from dist/...${RESET}"
-    cp -r dist/* "$INSTALL_DIR/"
-    [ -f "version.txt" ] && cp "version.txt" "$INSTALL_DIR/version.txt"
-else
-    for file in "${FILES[@]}"; do
-        if [ "$LOCAL_MODE" = true ]; then
-            echo -e "Copying $file..."
-            cp "$file" "$INSTALL_DIR/$file"
-        else
-            echo -e "Downloading $file from GitHub..."
-            curl -sSf -o "$INSTALL_DIR/$file" "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
-        fi
-    done
-fi
+for file in "${FILES[@]}"; do
+    if [ -f "$file" ]; then
+        echo -e "Copying $file..."
+        cp "$file" "$INSTALL_DIR/$file"
+    else
+        echo -e "Downloading $file from GitHub..."
+        curl -sSf -o "$INSTALL_DIR/$file" "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
+    fi
+done
+
 
 
 # 4. Set up Virtual Environment

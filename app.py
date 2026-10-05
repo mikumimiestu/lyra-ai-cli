@@ -1,12 +1,19 @@
-import requests
-import json
 import sys
 import os
+
+# Pastikan direktori tempat file ini berada selalu ada di sys.path
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
+import requests
+import json
 import re
 import time
 import threading
 
 # ─── Import custom modules ────────────────────────────────────────────────────
+
 from styling import (
     RESET, BOLD, DIM, ITALIC, WHITE, GREEN, RED, YELLOW, CYAN,
     COLOR_USER, COLOR_LYRA, COLOR_BORDER, COLOR_DIM, COLOR_TITLE,
@@ -18,13 +25,19 @@ from styling import (
 from spinner import Spinner
 from tools import (
     list_directory, read_file, write_file, execute_command,
-    create_directory, init_project, DEFAULT_TIMEOUT
+    create_directory, init_project, DEFAULT_TIMEOUT,
+    get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
+    tool_set_reminder, tool_list_reminders, tool_cancel_reminder
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
     VERSION, check_remote_version, perform_update
 )
-
+from memory import read_memory, save_memory, clear_memory
+from reminder import (
+    add_reminder, list_reminders, cancel_reminder,
+    ensure_daemon_running, is_daemon_running, run_reminder_daemon_loop
+)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 API_URL = "https://authx.astbyte.com/v1/chat/completions"
@@ -61,61 +74,56 @@ REASONING_EFFORTS = [
 ]
 
 # ─── System Prompt ────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """Kamu adalah Lyra, asisten AI canggih dari AstByte yang berjalan di terminal.
-Kamu memiliki akses ke tools komputer lokal pengguna dan mampu membangun project fullstack skala besar.
+SYSTEM_PROMPT_TEMPLATE = """Kamu adalah Lyra / Amagi, asisten AI canggih dari AstByte yang berjalan di terminal komputer pengguna.
+Kamu memiliki akses ke tools komputer lokal pengguna, memori jangka panjang (.md), sistem waktu laptop, pengingat otomatis, dan mampu membangun project fullstack skala besar.
+
+[WAKTU SISTEM LAPTOP PENGGUNA SAAT INI]:
+{system_time}
+
+[ISI MEMORI TERSIMPAN (~/.amagi_memory.md)]:
+{memory_section}
 
 Untuk memanggil tool, sertakan blok XML ini TEPAT di akhir jawabanmu:
 <tool_call>
-{
+{{
   "name": "nama_tool",
-  "arguments": {
+  "arguments": {{
     "key": "value"
-  }
-}
+  }}
+}}
 </tool_call>
 
 Daftar tool yang tersedia:
-- list_directory   : Mendaftar file/folder. Args: {"path": ".", "recursive": false, "depth": 2}
-- read_file        : Membaca teks file.     Args: {"filepath": "path/ke/file"}
-- write_file       : Menulis/edit file.     Args: {"filepath": "path", "content": "isi file"}
-- create_directory : Membuat folder baru.   Args: {"dirpath": "path/ke/folder"}
-- execute_command  : Jalankan terminal.     Args: {"command": "perintah", "cwd": "/optional/path", "timeout": 600}
+- list_directory   : Mendaftar file/folder. Args: {{"path": ".", "recursive": false, "depth": 2}}
+- read_file        : Membaca teks file.     Args: {{"filepath": "path/ke/file"}}
+- write_file       : Menulis/edit file.     Args: {{"filepath": "path", "content": "isi file"}}
+- create_directory : Membuat folder baru.   Args: {{"dirpath": "path/ke/folder"}}
+- execute_command  : Jalankan terminal.     Args: {{"command": "perintah", "cwd": "/optional/path", "timeout": 600}}
 - init_project     : Scaffolding project baru (NON-INTERAKTIF, langsung jalan).
-                     Args: {"project_type": "TIPE", "project_name": "nama", "target_dir": "/optional"}
+                     Args: {{"project_type": "TIPE", "project_name": "nama", "target_dir": "/optional"}}
+- save_memory      : Simpan fakta/catatan ke file memori ~/.amagi_memory.md. Args: {{"content": "catatan", "mode": "append"}}
+- read_memory      : Baca isi file memori ~/.amagi_memory.md. Args: {{}}
+- get_system_time  : Ambil tanggal, waktu, dan timezone laptop pengguna. Args: {{}}
+- set_reminder     : Setel pengingat baru & notifikasi popup desktop laptop. Amagi akan bangun sendiri menyalakan notifikasi! Args: {{"message": "pesan", "time_input": "10m" / "14:30" / "YYYY-MM-DD HH:MM"}}
+- list_reminders   : Daftar pengingat tersimpan. Args: {{"status": "pending"}}
+- cancel_reminder  : Batalkan pengingat. Args: {{"reminder_id": "rem_..."}}
 
-Tipe project yang didukung oleh init_project:
-  JavaScript/TypeScript:
-    - react, react-ts, react-js      → Vite + React (cepat, non-interaktif)
-    - next, nextjs, next-ts, next-js → Next.js App Router (Tailwind, ESLint)
-    - vue, vue-ts, vue-js            → Vite + Vue 3
-    - svelte, svelte-ts              → Vite + Svelte
-    - node, nodejs                   → Node.js vanilla dengan HTTP server
-    - express, express-ts, express-js→ Express.js API (cors, dotenv, nodemon)
-  Python:
-    - fastapi                        → FastAPI dengan struktur modular (routers, models, schemas)
-    - django                         → Django 4.x dengan migrate awal
-    - flask                          → Flask dengan Blueprint pattern
-  PHP:
-    - laravel                        → Laravel via Composer (--no-interaction)
-    - php, php-native, php-mvc       → PHP Native MVC (public/, src/, views/, config/)
-
-Panduan penggunaan tool:
-1. Gunakan init_project untuk membuat project baru — TIDAK perlu gunakan execute_command untuk npx/composer.
-2. Setelah init_project selesai, gunakan write_file untuk membuat/modifikasi file tambahan.
-3. Gunakan execute_command untuk: install package tambahan, jalankan server, run test, build.
-4. Timeout default sudah 600 detik, cukup untuk npm install / composer install project besar.
-5. Jangan sebutkan format XML/tool ini kepada pengguna secara langsung.
-6. Setelah tool selesai, berikan ringkasan hasil yang jelas dan actionable.
-7. Kamu bisa chain beberapa tool calls secara berurutan untuk menyelesaikan task kompleks.
-
-Strategi membangun project besar:
-1. Jalankan list_directory untuk cek apakah folder tujuan sudah ada.
-2. Jalankan init_project dengan tipe yang sesuai permintaan pengguna.
-3. Buat/modifikasi file-file utama (komponen, routes, models, config, env) dengan write_file.
-4. Install dependency tambahan yang diperlukan dengan execute_command.
-5. Jalankan server dev untuk verifikasi dengan execute_command.
-6. Berikan instruksi cara menjalankan project secara lengkap di akhir.
+Panduan fitur khusus:
+1. Memori: Jika pengguna meminta "ingat ini...", "simpan ke memori...", atau memberikan fakta penting pengguna, gunakan tool `save_memory`.
+2. Tanggal & Waktu: Selalu gunakan informasi waktu laptop terkini di atas saat menjawab pertanyaan terkait waktu.
+3. Pengingat & Notifikasi: Jika pengguna minta ingatkan sesuatu ("ingatkan saya 10 menit lagi untuk...", "set alarm jam 8 pagi"), gunakan tool `set_reminder`.
+4. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
 """
+
+def get_current_system_prompt():
+    """Menghasilkan System Prompt dinamis dengan waktu dan memori terbaru."""
+    time_info = get_system_time()
+    mem_info = read_memory()
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        system_time=time_info,
+        memory_section=mem_info if mem_info.strip() else "(Belum ada memori tersimpan)"
+    )
+
 
 # ─── Tool Call Parser ─────────────────────────────────────────────────────────
 def extract_tool_call(content):
@@ -250,6 +258,67 @@ def handle_update_command(interactive=True):
     else:
         print(f"  {RED}✖ Gagal memperbarui: {msg}{RESET}\n")
 
+def handle_memory_command():
+    """Interaktif pengelola memori Amagi AI."""
+    print(f"\n  {BOLD}{COLOR_LYRA}🧠 Memori Jangka Panjang Amagi AI (~/.amagi_memory.md){RESET}\n")
+    current_mem = read_memory()
+    print(f"  {DIM}--- Isi Memori Saat Ini ---{RESET}")
+    print(current_mem.strip() if current_mem.strip() else f"  {DIM}(Memori masih kosong){RESET}")
+    print(f"  {DIM}---------------------------{RESET}\n")
+    print(f"  1. {BOLD}Tambah Catatan Baru{RESET}")
+    print(f"  2. {BOLD}Reset / Bersihkan Memori{RESET}")
+    print(f"  3. {BOLD}Kembali{RESET}")
+    try:
+        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-3) ❯{RESET} ").strip()
+        if choice == "1":
+            note = input(f"  {BOLD}{COLOR_USER}Catatan/Fakta baru ❯{RESET} ").strip()
+            if note:
+                res = save_memory(note)
+                print(f"  {GREEN}{res}{RESET}\n")
+        elif choice == "2":
+            confirm = input(f"  {RED}Yakin ingin menghapus seluruh isi memori? (y/n) ❯{RESET} ").strip().lower()
+            if confirm == 'y':
+                res = clear_memory()
+                print(f"  {GREEN}{res}{RESET}\n")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+def handle_time_command():
+    """Menampilkan tanggal, waktu, dan timezone laptop pengguna."""
+    print(f"\n  {BOLD}{COLOR_LYRA}⏰ Waktu Sistem Laptop Pengguna{RESET}\n")
+    print(f"  {get_system_time()}\n")
+
+def handle_reminder_command():
+    """Interaktif pengelola pengingat & notifikasi desktop."""
+    print(f"\n  {BOLD}{COLOR_LYRA}🔔 Pengingat & Notifikasi Laptop Amagi AI{RESET}")
+    daemon_st = f"{GREEN}Aktif (Background Running){RESET}" if is_daemon_running() else f"{YELLOW}Mati (akan menyala otomatis){RESET}"
+    print(f"  {DIM}Status Daemon Background: {daemon_st}{RESET}\n")
+    
+    print(tool_list_reminders())
+    print()
+    print(f"  1. {BOLD}Buat Pengingat Baru{RESET}")
+    print(f"  2. {BOLD}Batalkan Pengingat{RESET}")
+    print(f"  3. {BOLD}Pastikan Daemon Background Aktif{RESET}")
+    print(f"  4. {BOLD}Kembali{RESET}")
+    try:
+        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-4) ❯{RESET} ").strip()
+        if choice == "1":
+            msg = input(f"  {BOLD}{COLOR_USER}Pesan pengingat ❯{RESET} ").strip()
+            waktu = input(f"  {BOLD}{COLOR_USER}Waktu (cth: '10m', '1h', '14:30', '30s') ❯{RESET} ").strip()
+            if msg and waktu:
+                res = tool_set_reminder(message=msg, time_input=waktu)
+                print(f"\n  {res}\n")
+        elif choice == "2":
+            rem_id = input(f"  {BOLD}{COLOR_USER}ID Pengingat yang ingin dibatalkan (cth: rem_123) ❯{RESET} ").strip()
+            if rem_id:
+                res = tool_cancel_reminder(rem_id)
+                print(f"  {res}\n")
+        elif choice == "3":
+            ensure_daemon_running()
+            print(f"  {GREEN}✓ Daemon pengingat latar belakang telah diaktifkan!{RESET}\n")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
 def render_help():
     """Tampilkan panel bantuan."""
     w = min(get_terminal_width() - 4, 80)
@@ -267,6 +336,9 @@ def render_help():
     cmds = [
         ("/model",          "Buka pilihan model AI"),
         ("/reasoning",      "Pilih tingkat penalaran (cepat / sedang)"),
+        ("/memory",         "Kelola memori jangka panjang (.md)"),
+        ("/time",           "Lihat tanggal, waktu & timezone laptop"),
+        ("/reminder",       "Kelola pengingat & notifikasi desktop"),
         ("/update",         "Cek & perbarui Lyra CLI ke versi terbaru"),
         ("/version",        "Tampilkan versi Lyra CLI saat ini"),
         ("/project",        "Buat project baru (React, Laravel, PHP, dll.)"),
@@ -285,6 +357,7 @@ def render_help():
         
     print_line("")
     print(f"  {B}╰{'─' * w}╯{R}\n")
+
 
 
 # ─── Stream Response Handler ─────────────────────────────────────────────────
@@ -478,6 +551,11 @@ def handle_project_command(cwd):
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
+    # Cek jika dipanggil dalam mode daemon
+    if len(sys.argv) > 1 and sys.argv[1] in ("--daemon", "daemon"):
+        run_reminder_daemon_loop()
+        sys.exit(0)
+
     config  = load_config()
     api_key = get_api_key(config=config)
 
@@ -494,8 +572,12 @@ def main():
 
     reasoning_effort = config.get("reasoning_effort", "medium")
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # Inisialisasi system prompt dengan waktu dan memori terbaru
+    messages = [{"role": "system", "content": get_current_system_prompt()}]
     active_cwd = os.getcwd()
+
+    # Pastikan daemon pengingat latar belakang berjalan
+    ensure_daemon_running()
 
     # ── Background Version Check ──────────────────────────────────────────────
     update_state = {"has_update": False, "latest_version": VERSION, "notified": False}
@@ -548,6 +630,18 @@ def main():
                 reasoning_effort = handle_reasoning_command(config)
                 continue
 
+            elif user_input.lower() in ("/memory", "/mem"):
+                handle_memory_command()
+                continue
+
+            elif user_input.lower() in ("/time", "/jam", "/tanggal"):
+                handle_time_command()
+                continue
+
+            elif user_input.lower() in ("/reminder", "/remind", "/alarm"):
+                handle_reminder_command()
+                continue
+
             elif user_input.lower() in ("/update", "/check-update"):
                 handle_update_command(interactive=True)
                 continue
@@ -560,9 +654,8 @@ def main():
                 handle_project_command(active_cwd)
                 continue
 
-
             elif user_input.lower() == "/clear":
-                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                messages = [{"role": "system", "content": get_current_system_prompt()}]
                 print(f"  {GREEN}✓ Riwayat percakapan dibersihkan.{RESET}\n")
                 continue
 
@@ -609,6 +702,8 @@ def main():
                 continue
 
             # ── Kirim ke AI ───────────────────────────────────────────────────
+            # Selalu perbarui system prompt dengan waktu & memori paling aktual
+            messages[0] = {"role": "system", "content": get_current_system_prompt()}
             messages.append({"role": "user", "content": user_input})
             print()
 
@@ -682,6 +777,24 @@ def main():
                             args.get("project_name", "project"),
                             args.get("target_dir", active_cwd),
                         )
+                    elif func_name == "save_memory":
+                        result = tool_save_memory(args.get("content", ""), mode=args.get("mode", "append"))
+                    elif func_name == "read_memory":
+                        result = tool_read_memory()
+                    elif func_name == "clear_memory":
+                        result = tool_clear_memory()
+                    elif func_name == "get_system_time":
+                        result = get_system_time()
+                    elif func_name == "set_reminder":
+                        result = tool_set_reminder(
+                            args.get("message", ""),
+                            time_input=args.get("time_input"),
+                            delay_seconds=args.get("delay_seconds")
+                        )
+                    elif func_name == "list_reminders":
+                        result = tool_list_reminders(status=args.get("status"))
+                    elif func_name == "cancel_reminder":
+                        result = tool_cancel_reminder(args.get("reminder_id", ""))
                     else:
                         result = f"Error: Tool '{func_name}' tidak dikenal."
 

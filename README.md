@@ -18,6 +18,9 @@
 Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untuk asisten AI **AstByte Lyra**. Aplikasi ini dilengkapi dengan antarmuka estetis full-page, render tabel grid presisi, pilihan model AI generasi baru, pengaturan tingkat penalaran (reasoning effort), animasi loading spinner, manajemen API Key yang aman, serta kemampuan agen AI lokal untuk mengelola file dan mengeksekusi perintah terminal secara aman.
 
 ### Fitur Utama
+*   **Memori Jangka Panjang (.md):** Menyimpan fakta dan catatan penting pengguna di `~/.amagi_memory.md` yang otomatis dibaca AI pada setiap percakapan.
+*   **Waktu & Tanggal Laptop:** Amagi dapat membaca waktu, tanggal, dan timezone terkini secara akurat langsung dari komputer pengguna.
+*   **Pengingat & Notifikasi Laptop ("Bangun Sendiri"):** Amagi memiliki daemon background yang dapat berjalan otomatis di latar belakang. Saat waktu pengingat tiba, Amagi akan bangun sendiri dan memunculkan notifikasi popup desktop (dengan suara) di laptop pengguna tanpa perlu mengetik `amagi`.
 *   **Desain Estetis Full-Page:** Tampilan logo gradasi True Color (Biru ➔ Ungu ➔ Pink), garis pembatas antar sesi, serta tata letak bersih tanpa card box yang meluber.
 *   **Daftar Perintah di Awalan:** Menampilkan daftar cepat perintah utama langsung saat aplikasi pertama kali dibuka.
 *   **Pilihan Model AI Generasi Terbaru:**
@@ -72,6 +75,9 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | :--- | :--- |
 | `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5) |
 | `/reasoning` | Atur tingkat penalaran (`cepat` / `sedang`) |
+| `/memory` | Kelola memori jangka panjang (`~/.amagi_memory.md`) |
+| `/time` | Lihat tanggal, waktu, dan timezone laptop pengguna |
+| `/reminder` | Kelola pengingat & notifikasi desktop laptop (daemon background) |
 | `/update` | Cek & perbarui Lyra CLI ke versi terbaru dari GitHub secara otomatis |
 | `/version` | Tampilkan versi Lyra CLI saat ini |
 | `/project` | Wizard scaffolding project baru (React, Next.js, Laravel, FastAPI, Express, dll.) |

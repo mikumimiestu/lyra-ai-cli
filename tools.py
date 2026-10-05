@@ -1,11 +1,21 @@
 import os
+import sys
 import subprocess
 import shlex
+import datetime
+import time
+
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+if _current_dir not in sys.path:
+    sys.path.insert(0, _current_dir)
+
 from styling import (
     BOLD, RED, GREEN, YELLOW, COLOR_USER, COLOR_LYRA, COLOR_DIM, RESET, DIM, CYAN,
     render_permission_box
 )
 from spinner import Spinner
+from memory import read_memory, save_memory, clear_memory
+from reminder import add_reminder, list_reminders, cancel_reminder, ensure_daemon_running, is_daemon_running
 
 # ─── Timeout yang lebih lama untuk operasi berat ─────────────────────────────
 DEFAULT_TIMEOUT = 600   # 10 menit — cukup untuk npm/composer install besar
@@ -572,4 +582,89 @@ def init_project(project_type, project_name, target_dir=None):
     except Exception as e:
         spinner.stop()
         return f"❌ Error saat membuat project: {str(e)}"
+
+# ─── System Time & Date Tool ──────────────────────────────────────────────────
+def get_system_time():
+    """Mendapatkan informasi tanggal, waktu, dan zona waktu dari laptop pengguna."""
+    now = datetime.datetime.now()
+    days_id = {
+        "Monday": "Senin", "Tuesday": "Selasa", "Wednesday": "Rabu",
+        "Thursday": "Kamis", "Friday": "Jumat", "Saturday": "Sabtu", "Sunday": "Minggu"
+    }
+    months_id = {
+        "January": "Januari", "February": "Februari", "March": "Maret",
+        "April": "April", "May": "Mei", "June": "Juni", "July": "Juli",
+        "August": "Agustus", "September": "September", "October": "Oktober",
+        "November": "November", "December": "Desember"
+    }
+    
+    day_en = now.strftime("%A")
+    month_en = now.strftime("%B")
+    
+    day_id = days_id.get(day_en, day_en)
+    month_id = months_id.get(month_en, month_en)
+    
+    date_str = f"{day_id}, {now.strftime('%d')} {month_id} {now.strftime('%Y')}"
+    time_str = now.strftime("%H:%M:%S")
+    tz_str = time.strftime("%Z") or time.tzname[0]
+    
+    return (
+        f"📅 Tanggal : {date_str}\n"
+        f"⏰ Waktu   : {time_str}\n"
+        f"🌐 Timezone: {tz_str}"
+    )
+
+# ─── Memory Tools ─────────────────────────────────────────────────────────────
+def tool_save_memory(content: str, mode: str = "append"):
+    """Menyimpan catatan atau fakta ke file memori ~/.amagi_memory.md."""
+    if not content:
+        return "Error: Konten memori tidak boleh kosong."
+    return save_memory(content, mode=mode)
+
+def tool_read_memory():
+    """Membaca isi file memori ~/.amagi_memory.md."""
+    content = read_memory()
+    return content if content.strip() else "(File memori kosong)"
+
+def tool_clear_memory():
+    """Mereset file memori."""
+    return clear_memory()
+
+# ─── Reminder Tools ───────────────────────────────────────────────────────────
+def tool_set_reminder(message: str, time_input: str = None, delay_seconds: int = None):
+    """Menambahkan pengingat baru dan mengaktifkan notifikasi laptop."""
+    if not message:
+        return "Error: Pesan pengingat tidak boleh kosong."
+    try:
+        rem = add_reminder(message=message, time_input=time_input, delay_seconds=delay_seconds)
+        daemon_status = "Aktif (Background Daemon Running)" if is_daemon_running() else "Aktif"
+        return (
+            f"✅ Pengingat berhasil disetel!\n"
+            f"   ● Pesan   : {rem['message']}\n"
+            f"   ● Waktu   : {rem['target_time_str']}\n"
+            f"   ● Status  : Pending ({daemon_status})\n"
+            f"   ● Notif   : Amagi akan bangun dan memunculkan notifikasi di laptop Anda secara otomatis."
+        )
+    except Exception as e:
+        return f"❌ Gagal menyetel pengingat: {e}"
+
+def tool_list_reminders(status: str = None):
+    """Mendaftar pengingat yang ada."""
+    reminders = list_reminders(status_filter=status)
+    if not reminders:
+        return "Belum ada pengingat tersimpan."
+    
+    output = ["📋 Daftar Pengingat Amagi AI:"]
+    for i, r in enumerate(reminders, 1):
+        st = r.get("status", "pending").upper()
+        output.append(f" {i}. [{st}] {r['message']} → {r['target_time_str']} (ID: {r['id']})")
+    return "\n".join(output)
+
+def tool_cancel_reminder(reminder_id: str):
+    """Membatalkan pengingat."""
+    success = cancel_reminder(reminder_id)
+    if success:
+        return f"✅ Pengingat ID '{reminder_id}' berhasil dibatalkan."
+    return f"❌ Pengingat ID '{reminder_id}' tidak ditemukan atau sudah tidak aktif."
+
 
