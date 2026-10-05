@@ -161,73 +161,34 @@ def str_width(text):
 
 
 # ─── Permission Box UI ────────────────────────────────────────────────────────
+# ─── Permission Box UI ────────────────────────────────────────────────────────
 def render_permission_box(title, details):
-    """Render box konfirmasi izin eksekusi yang rapi dan presisi, menangani multi-line script."""
+    """Render konfirmasi izin eksekusi hanya dengan garis atas & bawah (tanpa garis samping)."""
     term_w = get_terminal_width()
-    w = max(65, min(term_w - 6, 105))
-    content_w = w - 6
-    
+    w = min(term_w - 8, 70)
     B, T, A, Y, R, D = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, YELLOW, RESET, COLOR_DIM
 
     title_str = f" 🛡️  {BOLD}{Y}{title}{R} "
-    pad_title = max(0, w - 2 - str_width(title_str))
-    
+    pad_title = max(4, w - str_width(title_str) - 2)
     top_b = "─" * pad_title
-    print(f"\n  {B}╭──{title_str}{B}{top_b}╮{R}")
+    
+    print(f"\n  {B}──{title_str}{B}{top_b}{R}")
 
     for k, v in details.items():
         v_str = str(v)
         if "\n" in v_str:
-            k_line = f"{D}{k:<10}:{R}"
-            vis_k = str_width(k_line)
-            pad_k = max(0, content_w - vis_k)
-            sp_k = " " * pad_k
-            print(f"  {B}│{R}  {k_line}{sp_k}  {B}│{R}")
-            
+            print(f"    {D}{k:<10}:{R}")
             v_lines = v_str.split("\n")
             for sub_l in v_lines:
                 if not sub_l.strip():
                     continue
                 highlighted = highlight_syntax(sub_l)
-                plain_sub = strip_ansi(sub_l)
-                if str_width(plain_sub) > content_w - 4:
-                    wrapped_subs = wrap_text_display_width(highlighted, content_w - 4)
-                else:
-                    wrapped_subs = [highlighted]
-                
-                for wl in wrapped_subs:
-                    vis_len = str_width(wl)
-                    pad = max(0, content_w - vis_len - 4)
-                    sp = " " * pad
-                    print(f"  {B}│{R}      {wl}{sp}  {B}│{R}")
+                print(f"      {highlighted}")
         else:
-            k_str = f"{D}{k:<10}: {R}"
-            vis_k_len = 12
-            val_max = content_w - vis_k_len
-            v_plain = strip_ansi(v_str)
-            
-            if str_width(v_plain) > val_max:
-                wrapped_vals = wrap_text_display_width(v_str, val_max)
-                for idx, wl in enumerate(wrapped_vals):
-                    if idx == 0:
-                        vis_len = str_width(k_str + wl)
-                        pad = max(0, content_w - vis_len)
-                        sp = " " * pad
-                        print(f"  {B}│{R}  {k_str}{BOLD}{WHITE}{wl}{R}{sp}  {B}│{R}")
-                    else:
-                        indent_pad = " " * 12
-                        vis_len = str_width(indent_pad + wl)
-                        pad = max(0, content_w - vis_len)
-                        sp = " " * pad
-                        print(f"  {B}│{R}  {indent_pad}{BOLD}{WHITE}{wl}{R}{sp}  {B}│{R}")
-            else:
-                vis_len = str_width(k_str + f"{BOLD}{WHITE}{v_str}{R}")
-                pad = max(0, content_w - vis_len)
-                sp = " " * pad
-                print(f"  {B}│{R}  {k_str}{BOLD}{WHITE}{v_str}{R}{sp}  {B}│{R}")
+            highlighted = highlight_syntax(v_str) if k.lower() in ("command", "script", "perintah") else f"{BOLD}{WHITE}{v_str}{R}"
+            print(f"    {D}{k:<10}:{R} {highlighted}")
 
-    bot_b = "─" * w
-    print(f"  {B}╰{bot_b}╯{R}")
+    print(f"  {B}{'─' * w}{R}")
 
 
 # ─── Markdown Renderer & Code Highlighting ────────────────────────────────────
@@ -284,19 +245,20 @@ def format_markdown_line(line, state):
             lang = stripped[3:].strip()
             state['lang'] = lang
             lang_label = f" [{lang.upper()}]" if lang else ""
-            w = min(get_terminal_width() - 8, 72)
-            top_border = f"{COLOR_BORDER}┌── Code{lang_label} {'─' * max(0, w - str_width(lang_label) - 9)}┐{RESET}"
+            w = min(get_terminal_width() - 8, 70)
+            top_border = f"  {COLOR_BORDER}── Code{lang_label} {'─' * max(4, w - str_width(lang_label) - 9)}{RESET}"
             return top_border, state
         else:
             state['in_code'] = False
             state['lang'] = ""
-            w = min(get_terminal_width() - 8, 72)
-            bot_border = f"{COLOR_BORDER}└{'─' * w}┘{RESET}"
+            w = min(get_terminal_width() - 8, 70)
+            bot_border = f"  {COLOR_BORDER}{'─' * w}{RESET}"
             return bot_border, state
 
     if state['in_code']:
         highlighted = highlight_syntax(line, state['lang'])
-        return f"{COLOR_BORDER}│{RESET} {highlighted}", state
+        return f"    {highlighted}", state
+
 
     # Headers
     if line.startswith("# "):
