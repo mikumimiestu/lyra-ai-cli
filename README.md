@@ -64,10 +64,10 @@ Logo ASCII Lyra CLI dengan gradasi biru–ungu–pink dikembalikan pada tampilan
 Editor interaktif memakai `prompt_toolkit`. Instalasi baru memasang dependensinya secara otomatis. Jika dependency belum tersedia atau input diarahkan melalui pipe, Lyra memakai input teks sederhana; jalankan installer terbaru untuk mendapat editor penuh.
 
 ```sh
-curl -sSf https://amagi-cli.astbyte.com/install | bash
+curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
-> Domain `/install` perlu dideploy dari folder `website` agar memakai installer v2.3.0 yang memasang dependency editor baru. Push GitHub sendiri tidak menjamin deployment domain berubah. Installer tetap mengunduh source aplikasi dari branch `main` GitHub.
+> Installer mengambil script dan source aplikasi langsung dari GitHub (`raw.githubusercontent.com`, branch `main`), jadi tidak bergantung pada domain atau firewall server sendiri.
 
 [Bahasa Indonesia](#indonesian-versi-bahasa-indonesia) | [English](#english-version)
 
@@ -103,17 +103,17 @@ Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untu
 
 **Untuk macOS / Linux (Terminal):**
 ```bash
-curl -sSf https://amagi-cli.astbyte.com/install | bash
+curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
 **Untuk Windows (PowerShell):**
 ```powershell
-iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
 ```
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.6.0.tar.gz
+pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -177,17 +177,17 @@ Amagi CLI is a modern, interactive terminal chat client for **AstByte Lyra**. It
 
 **For macOS / Linux (Terminal):**
 ```bash
-curl -sSf https://amagi-cli.astbyte.com/install | bash
+curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
 **For Windows (PowerShell):**
 ```powershell
-iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
 ```
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.6.0.tar.gz
+pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 ```
 
 #### Method 3: Local Clone Installation

@@ -1,9 +1,9 @@
 export const repository = 'https://github.com/mikumimiestu/lyra-ai-cli';
 export const version = __AMAGI_CLI_VERSION__;
 export const installers = [
-  { label: 'macOS / Linux', shell: 'Terminal', command: 'curl -sSf https://amagi-cli.astbyte.com/install | bash' },
-  { label: 'Windows', shell: 'PowerShell', command: 'iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex' },
-  { label: 'pip', shell: 'Python', command: `pip install https://amagi-cli.astbyte.com/packages/amagi_cli-${version}.tar.gz` },
+  { label: 'macOS / Linux', shell: 'Terminal', command: 'curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash' },
+  { label: 'Windows', shell: 'PowerShell', command: 'iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex' },
+  { label: 'pip', shell: 'Python', command: `pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git` },
 ];
 export const models = [
   { name: 'Lyra Luma 5.5', id: 'lyra-luma-flash', reasoning: false, default: false },
@@ -40,6 +40,12 @@ export const shortcuts = [
 ];
 
 export const releases = [
+  { version: '2.6.0', title: 'Tampilan ala agent CLI.', changes: [
+    'Logo Lyra tetap sama. Kartu sambutan berbingkai bulat menampilkan versi, model, reasoning, dan direktori kerja.',
+    'Composer berbingkai bulat dengan footer satu baris: model, reasoning, direktori, branch Git, dan petunjuk tombol.',
+    'Jawaban diawali penanda ●. Aktivitas tool tampil per langkah, misalnya ● Baca(app.py) lalu ⎿ Membaca 120 baris, lengkap dengan status exit dan cuplikan output perintah.',
+    'Preview perubahan file memakai nomor baris dan bar merah/hijau. Dialog izin menampilkan seluruh perintah sebelum disetujui.',
+  ], commit: '98c69da' },
   { version: '2.5.0', title: 'Thinking yang ringkas.', changes: [
     'Indikator satu baris dengan durasi nyata dan metadata model. Penalaran panjang disembunyikan dari percakapan.',
     'Spinner dibersihkan sebelum jawaban ditampilkan, saat error, atau ketika proses dibatalkan.',

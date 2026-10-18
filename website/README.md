@@ -24,23 +24,23 @@ Tiga file instalasi tersedia saat development, preview, dan di hasil build:
 
 - `/install`: script asli `../install.sh`.
 - `/install.ps1`: script asli `../install.ps1`.
-- `/packages/amagi_cli-2.5.0.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
+- `/packages/amagi_cli-2.6.0.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
 
 Perintah instalasi:
 
 ```sh
-curl -sSf https://amagi-cli.astbyte.com/install | bash
+curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
 ```
 
 ```powershell
-iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
 ```
 
 ```sh
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.5.0.tar.gz
+pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 ```
 
-Domain perlu mengarah ke deployment website ini agar URL publik berfungsi. Layani ketiga file sebelum aturan fallback SPA, tanpa autentikasi atau redirect. Gunakan `Content-Type: text/plain; charset=utf-8` untuk script dan `application/gzip` untuk paket bila hosting mendukung pengaturan header. Script Bash dan PowerShell tetap mengambil file aplikasi dari GitHub. Pip mengunduh paket aplikasi dari domain ini dan dependensi melalui index pip yang dikonfigurasi pengguna.
+Perintah instalasi publik memakai GitHub langsung (`raw.githubusercontent.com` dan `pip install git+https://...`), sehingga tidak bergantung pada domain website. Tiga endpoint di atas tetap tersedia sebagai cadangan; bila dipakai, layani sebelum aturan fallback SPA.
 
 ## Halaman
 

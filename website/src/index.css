@@ -121,3 +121,19 @@
 @media(max-width:760px){.home .workspace-scene{height:240px}.hero-workspace .console-preview .terminal-logo{font-size:8px}.hero-workspace .console-preview .terminal-body{padding:20px}.console-output{font-size:10px;min-height:124px}.console-command{font-size:11px}.console-context{font-size:9px}.console-shortcuts{font-size:8px}.console-answer{font-size:10px}.console-event{font-size:10px}.console-summary{font-size:9px}.console-diff{font-size:9px}.console-permission{font-size:9px}.demo-playback{font-size:7px}.console-keyboard{grid-template-columns:1fr;gap:25px}.shortcut-list>div{grid-template-columns:1fr 1fr;gap:13px}.shortcut-list dd{font-size:11px}.local-tools>div{grid-template-columns:1fr;gap:25px}.local-tools article+article{border-left:0;border-top:1px solid var(--line);padding:25px 0 0}.local-tools h3{font-size:24px}.docs-sidebar{max-height:none;overflow:visible;padding-right:0}.docs-sidebar>a{padding:5px 0;font-size:9px}.docs-content .doc-facts{gap:10px}.doc-facts strong{font-size:13px}.doc-facts>span{font-size:9px}.doc-transcript{padding:18px;font-size:10px}.appearance-options>div{grid-template-columns:1fr;gap:6px}.appearance-options code{font-size:11px}.appearance-options span{font-size:11px}.command-context-note{display:block;padding:14px 17px}.command-context-note p{font-size:11px;margin-top:7px}.release-entry h2{font-size:25px}.release-upgrade{max-width:none;margin-top:23px}}
 @media(max-width:420px){.hero-workspace .console-preview .terminal-logo{font-size:6.5px}.hero-workspace .console-preview .terminal-body{padding:17px 14px}.console-command{font-size:10px}.console-shortcuts{font-size:7px}.console-diff{font-size:8px}.console-permission{font-size:8px}.hero-workspace .demo-caption{font-size:8px}.demo-playback{flex-wrap:wrap}.doc-facts{grid-template-columns:repeat(2,1fr);row-gap:22px}.shortcut-list kbd{font-size:9px;padding:5px}.upgrade-inline>div:first-child{align-items:flex-start;flex-direction:column;gap:8px}}
 @media(prefers-reduced-motion:reduce){.console-output,.thinking-glyph.spinning,.console-composer i{animation:none}}
+/* v2.6.0 — agent-CLI style console preview */
+.console-welcome{border:1px solid #776987;border-radius:8px;padding:9px 12px 8px;margin:2px 0 6px;font-size:9px;line-height:1.7;color:#e0e2d5}
+.console-welcome p{margin:0}.console-welcome-title{color:#a2b299;font-size:8px;margin-bottom:3px!important}.console-welcome-title span{color:#c5aee8;font-weight:600}
+.hero-workspace .console-preview .console-composer{border-radius:8px;border-color:#8b7bb8}
+.console-sent{display:flex;gap:8px;border-color:#5f566d;color:#e5e5db;margin:8px 0 10px;font-size:10px;line-height:1.6;overflow-wrap:anywhere}
+.console-sent>span:first-child{color:#b6a0dc}
+.console-tool{margin:7px 0 0;color:#e0e2d5;font-size:9px}.console-tool i{font-style:normal;color:#b6a0dc}.console-tool b{font-weight:600}.console-tool span{color:#98a58d}
+.console-result{margin:0 0 0 9px;color:#98a58d;font-size:8px}
+.console-answer{margin-left:0;max-width:none}.console-answer i{font-style:normal;color:#b6a0dc}
+.console-summary{margin-left:0;color:#98a58d}
+.console-shortcuts{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 10px}.console-shortcuts span{color:#8f9c85}
+.diff-line{display:block;padding:0 6px;border-radius:2px}.diff-line u{text-decoration:none;color:#8f9c85;margin-right:8px;display:inline-block;min-width:16px;text-align:right}
+.diff-line.diff-remove{background:#52202566}.diff-line.diff-add{background:#143e2466}
+.diff-add-text{font-style:normal;color:#a6c899}.diff-remove-text{font-style:normal;color:#e39791}
+.console-permission-box{border:1px solid #cfae62;border-radius:6px;padding:4px 9px;margin:6px 0 0;font-size:8px;color:#e3c88a}.console-permission-box p{margin:0}.console-permission-box em{font-style:normal;color:#98a58d;margin-right:6px}
+.console-permission{margin-left:0}

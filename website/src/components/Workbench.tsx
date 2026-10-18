@@ -33,9 +33,9 @@ export function Installation({ compact = false }: { compact?: boolean }) {
 
 type DemoPhase = 'waiting' | 'processing' | 'done';
 const sessions = [
-  { label: 'Thinking', command: 'jelaskan alur @app.py', note: 'Thinking berhenti saat jawaban tampil. Ringkasan menghitung durasi tugas dan file unik yang dibaca.' },
+  { label: 'Thinking', command: 'jelaskan alur @app.py', note: 'Indikator ✻ berhenti saat jawaban tampil. Tiap tool muncul sebagai langkah; ringkasan menghitung durasi tugas dan file unik yang dibaca.' },
   { label: '@file', command: 'baca @app.py dan @"catatan project.md"', note: 'Referensi file teks UTF-8 dibaca saat pesan dikirim. Nama file dengan spasi bisa ditulis dalam tanda kutip.' },
-  { label: 'Preview diff', command: 'ubah pesan pembuka di @app.py', note: 'Preview perubahan ditampilkan sebelum izin penulisan. File baru ditulis setelah pengguna menyetujuinya.' },
+  { label: 'Preview diff', command: 'ubah pesan pembuka di @app.py', note: 'Preview berisi nomor baris dan bar merah/hijau, lalu dialog izin menampilkan detail penulisan. File ditulis setelah pengguna menyetujuinya.' },
 ];
 
 export function TerminalPreview() {
@@ -75,25 +75,32 @@ export function TerminalPreview() {
       <div className="terminal-bar"><span className="terminal-dots"><i /><i /><i /></span><span>Lyra Console — ~/amagi-cli</span><span>v{version}</span></div>
       <div className="terminal-body">
         <pre className="terminal-logo" aria-label="Logo ASCII Lyra CLI">{cliLogo}</pre>
-        <div className="console-context">Orpheus 6 · reasoning medium</div>
-        <div className="console-command"><span>›</span><span>{session.command}</span></div>
-        <p className="console-speaker">✦ LYRA</p>
+        <div className="console-welcome" aria-label="Kartu sambutan Lyra CLI">
+          <p className="console-welcome-title"><span>✦ Lyra CLI</span> v{version}</p>
+          <p>Mau ngerjain apa hari ini?</p>
+          <p className="console-context">Lyra Orpheus 6 · reasoning medium</p>
+          <p className="console-context">~/amagi-cli</p>
+        </div>
+        <div className="console-composer console-sent"><span>›</span><span>{session.command}</span></div>
         <div className="console-output" key={`${active}-${phase}`}>
           {phase !== 'done' ? <>
-            <div className="console-thinking"><span className={playing && !reducedMotion ? 'thinking-glyph spinning' : 'thinking-glyph'} aria-hidden="true">◌</span><span>{phase === 'waiting' ? 'Menunggu respons...' : 'Memproses permintaan...'}</span><time>{elapsed}s</time></div>
+            <div className="console-thinking"><span className={playing && !reducedMotion ? 'thinking-glyph spinning' : 'thinking-glyph'} aria-hidden="true">✻</span><span>{phase === 'waiting' ? 'Menunggu respons...' : 'Memproses permintaan...'}</span><time>({elapsed}s · Ctrl+C batal)</time></div>
             <p className="console-hint">{playing ? 'Simulasi sedang diputar' : 'Langkah contoh · lanjutkan untuk melihat hasil'}</p>
           </> : active === 2 ? <>
-            <p className="console-group">Perubahan</p><p className="console-event">✓ Baca · app.py</p>
-            <div className="console-diff"><span className="diff-remove">− print("Halo")</span><span className="diff-add">+ print("Mau bikin apa hari ini?")</span></div>
-            <p className="console-permission">Izinkan penulisan ini? (y/n) ›</p>
+            <p className="console-tool"><i>●</i> <b>Baca</b><span>(app.py)</span></p><p className="console-result">⎿ Membaca 42 baris</p>
+            <p className="console-tool"><i>●</i> <b>Tulis</b><span>(app.py)</span></p><p className="console-result">⎿ Perubahan · <em className="diff-add-text">+1</em> <em className="diff-remove-text">-1</em></p>
+            <div className="console-diff"><span className="diff-line diff-remove"><u>12</u>-print("Halo")</span><span className="diff-line diff-add"><u>12</u>+print("Mau bikin apa hari ini?")</span></div>
+            <div className="console-permission-box"><p>⚠ Konfirmasi Tulis File</p><p><em>Path</em> app.py</p></div>
+            <p className="console-permission">Izinkan? (y/n) ❯</p>
           </> : <>
-            <p className="console-group">Eksplorasi</p><p className="console-event">✓ Baca · app.py</p>{active === 1 && <p className="console-event">✓ Baca · catatan project.md</p>}
-            <p className="console-answer">{active === 0 ? 'app.py mengatur sesi, model, dan pemanggilan tool.' : 'Kedua file dipakai sebagai konteks percakapan.'}</p>
-            <p className="console-summary">Selesai · {elapsed || 3}s · {active === 1 ? '2 file' : '1 file'} dibaca</p>
+            <p className="console-tool"><i>●</i> <b>Baca</b><span>(app.py)</span></p><p className="console-result">⎿ Membaca 42 baris</p>
+            {active === 1 && <><p className="console-tool"><i>●</i> <b>Baca</b><span>(catatan project.md)</span></p><p className="console-result">⎿ Membaca 8 baris</p></>}
+            <p className="console-answer"><i>●</i> {active === 0 ? 'app.py mengatur sesi, model, dan pemanggilan tool.' : 'Kedua file dipakai sebagai konteks percakapan.'}</p>
+            <p className="console-summary">✻ Selesai · {elapsed || 3}s · {active === 1 ? '2 file' : '1 file'} dibaca</p>
           </>}
         </div>
-        <div className="console-composer"><span className="console-composer-label">pesan</span><span>› <i /></span></div>
-        <div className="console-context console-shortcuts">/ perintah · @ file · Alt+Enter baris baru</div>
+        <div className="console-composer"><span>› <i /></span></div>
+        <div className="console-context console-shortcuts">Orpheus 6 · medium | ~/amagi-cli / main <span>/ perintah · @ file · Alt+Enter baris baru</span></div>
       </div>
       <div className="terminal-status"><span><i /> Orpheus 6 · medium</span><span>amagi-cli / main</span></div>
     </div>
