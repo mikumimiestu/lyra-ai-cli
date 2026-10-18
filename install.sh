@@ -54,15 +54,15 @@ echo -e "${CYAN}Setting up virtual environment...${RESET}"
 rm -rf "$INSTALL_DIR/venv"
 python3 -m venv "$INSTALL_DIR/venv"
 
-echo -e "${CYAN}Installing dependencies (requests)...${RESET}"
+echo -e "${CYAN}Installing dependencies (requests, prompt_toolkit)...${RESET}"
 if [ -f "$INSTALL_DIR/venv/bin/python3" ]; then
     "$INSTALL_DIR/venv/bin/pip" install --upgrade pip &>/dev/null || true
-    "$INSTALL_DIR/venv/bin/pip" install requests
+    "$INSTALL_DIR/venv/bin/pip" install requests 'prompt_toolkit>=3.0.36,<4'
 elif [ -f "$INSTALL_DIR/venv/bin/python" ]; then
     "$INSTALL_DIR/venv/bin/pip" install --upgrade pip &>/dev/null || true
-    "$INSTALL_DIR/venv/bin/pip" install requests
+    "$INSTALL_DIR/venv/bin/pip" install requests 'prompt_toolkit>=3.0.36,<4'
 else
-    pip3 install requests --user &>/dev/null || true
+    pip3 install requests 'prompt_toolkit>=3.0.36,<4' --user
 fi
 
 # 5. Create wrapper script

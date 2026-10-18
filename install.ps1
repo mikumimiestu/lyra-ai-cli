@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 $INSTALL_DIR = "$HOME\.amagi-cli"
-$FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py", "version.txt")
+$FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py",, "version.txt")
 
 Write-Host "==================================================" -ForegroundColor Magenta
 Write-Host "        Installing Amagi CLI AI Assistant          " -ForegroundColor Cyan
@@ -59,13 +59,13 @@ if (!(Test-Path $pythonVenv)) {
     & $pythonCmd -m venv $venvPath
 }
 
-Write-Host "Installing dependencies (requests)..." -ForegroundColor Cyan
+Write-Host "Installing dependencies (requests, prompt_toolkit)..." -ForegroundColor Cyan
 if (Test-Path $pythonVenv) {
     & $pythonVenv -m ensurepip --default-pip 2>$null | Out-Null
-    & $pythonVenv -m pip install requests --quiet
+    & $pythonVenv -m pip install requests 'prompt_toolkit>=3.0.36,<4' --quiet
 } else {
     $pythonVenv = $pythonCmd
-    & $pythonCmd -m pip install requests --quiet
+    & $pythonCmd -m pip install requests 'prompt_toolkit>=3.0.36,<4' --quiet
 }
 
 # 5. Create amagi.cmd wrapper in User Bin directory

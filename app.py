@@ -23,6 +23,7 @@ from styling import (
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
 from spinner import Spinner
+from styling import TerminalInput, COMMANDS, tool_activity
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -320,44 +321,16 @@ def handle_reminder_command():
         print()
 
 def render_help():
-    """Tampilkan panel bantuan."""
-    w = min(get_terminal_width() - 4, 80)
-    B, T, A, D, Y, R = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, COLOR_DIM, YELLOW, RESET
-    
-    def print_line(content):
-        v_len = str_width(content)
-        pad = max(0, w - v_len)
-        print(f"  {B}│{R}{content}{' ' * pad}{B}│{R}")
-
-    print(f"\n  {B}╭{'─' * w}╮{R}")
-    print_line(f"  {BOLD}{A}Perintah Lyra CLI (v{VERSION}){R}")
-    print_line("")
-    
-    cmds = [
-        ("/model",          "Buka pilihan model AI"),
-        ("/reasoning",      "Pilih tingkat penalaran (cepat / sedang)"),
-        ("/memory",         "Kelola memori jangka panjang (.md)"),
-        ("/time",           "Lihat tanggal, waktu & timezone laptop"),
-        ("/reminder",       "Kelola pengingat & notifikasi desktop"),
-        ("/update",         "Cek & perbarui Lyra CLI ke versi terbaru"),
-        ("/version",        "Tampilkan versi Lyra CLI saat ini"),
-        ("/project",        "Buat project baru (React, Laravel, PHP, dll.)"),
-        ("/clear",          "Bersihkan riwayat percakapan"),
-        ("/history",        "Tampilkan ringkasan riwayat chat"),
-        ("/cd <path>",      "Ganti direktori kerja aktif"),
-        ("/ls [path]",      "Tampilkan isi direktori"),
-        ("/run <cmd>",      "Langsung jalankan perintah terminal"),
-        ("/reset-key",      "Hapus & atur ulang API Key"),
-        ("/help",           "Tampilkan bantuan ini"),
-        ("exit / quit",     "Keluar dari Lyra CLI"),
-    ]
-    
-    for cmd, desc in cmds:
-        print_line(f"   {BOLD}{Y}{cmd:<18}{R}  {D}{desc}{R}")
-        
-    print_line("")
-    print(f"  {B}╰{'─' * w}╯{R}\n")
-
+    print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}Perintah Lyra{RESET}\n")
+    width = max(10, get_terminal_width() - 24)
+    from styling import wrap_text_display_width
+    for command, description in COMMANDS + [('exit / quit', 'Keluar dari Lyra')]:
+        lines = wrap_text_display_width(description, width)
+        print(f"  {COLOR_LYRA}{command:<16}{RESET}  {COLOR_DIM}{lines[0]}{RESET}")
+        for line in lines[1:]:
+            print(f"                    {COLOR_DIM}{line}{RESET}")
+    print(f"\n  {COLOR_DIM}Enter kirim · Alt+Enter / Ctrl+J baris baru{RESET}")
+    print(f"  {COLOR_DIM}Tab / panah pilih perintah · Ctrl+C batalkan input · Ctrl+D keluar{RESET}\n")
 
 
 # ─── Stream Response Handler ─────────────────────────────────────────────────
@@ -369,7 +342,7 @@ def stream_ai_response(headers, data, model_info=None):
     reasoning_effort = data.get("reasoning_effort", "medium")
     reasoning_label = "cepat" if reasoning_effort == "low" else "sedang"
     
-    spinner_msg = f"{model_name} (penalaran {reasoning_label}) sedang berpikir..."
+    spinner_msg = "Menunggu Lyra…"
     spinner = Spinner(spinner_msg)
     spinner.start()
     
@@ -392,6 +365,7 @@ def stream_ai_response(headers, data, model_info=None):
     if response.status_code != 200:
         return response.status_code, response.text
 
+    print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}Lyra{RESET}")
     thinking_printed = False
     in_thinking_mode = False
 
@@ -431,7 +405,7 @@ def stream_ai_response(headers, data, model_info=None):
                 # 1. Explicit reasoning chunk dari API
                 if reasoning_chunk:
                     if not thinking_printed:
-                        print(f"\n  {COLOR_DIM}{ITALIC}🧠 Process penalaran ({reasoning_label})...{RESET}")
+                        print(f"\n  {COLOR_DIM}{ITALIC}Penalaran {reasoning_label}…{RESET}")
                         thinking_printed = True
                         in_thinking_mode = True
 
@@ -452,7 +426,7 @@ def stream_ai_response(headers, data, model_info=None):
                 # 2. Tag <think> dalam teks
                 if "<think>" in full_content and "</think>" not in full_content:
                     if not thinking_printed:
-                        print(f"\n  {COLOR_DIM}{ITALIC}🧠 Process penalaran ({reasoning_label})...{RESET}")
+                        print(f"\n  {COLOR_DIM}{ITALIC}Penalaran {reasoning_label}…{RESET}")
                         thinking_printed = True
                         in_thinking_mode = True
                     
@@ -476,7 +450,6 @@ def stream_ai_response(headers, data, model_info=None):
                     if in_thinking_mode:
                         in_thinking_mode = False
                         print()
-                        render_full_divider(COLOR_BORDER)
                         print()
 
                 # 4. Deteksi awal tool call XML
@@ -565,7 +538,7 @@ def main():
     }
 
     model_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
-    if model_idx >= len(MODELS):
+    if not isinstance(model_idx, int) or not 0 <= model_idx < len(MODELS):
         model_idx = DEFAULT_MODEL_INDEX
         config["model_index"] = model_idx
         save_config(config)
@@ -590,9 +563,15 @@ def main():
 
     threading.Thread(target=_bg_check_update, daemon=True).start()
 
-    # Render Logo Gradasi Amagi & Header
+    # Compact Lyra welcome
     print_logo()
-    render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd)
+    render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd, MODELS[model_idx]["supports_reasoning"])
+    editor = TerminalInput(lambda: {
+        "model": MODELS[model_idx]["name"],
+        "effort": config.get("reasoning_effort", "medium"),
+        "directory": active_cwd,
+        "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
+    })
 
     # ── Loop utama ────────────────────────────────────────────────────────────
     while True:
@@ -605,8 +584,14 @@ def main():
                 print(f"  {YELLOW}⚡ Versi terbaru (v{update_state['latest_version']}) tersedia! Ketik {BOLD}/update{RESET}{YELLOW} untuk memperbarui otomatis.{RESET}\n")
 
             render_full_divider(COLOR_BORDER)
-            prompt_str = f"  {BOLD}{COLOR_USER}❯{RESET} "
-            user_input = input(prompt_str).strip()
+            try:
+                user_input = editor.read().strip()
+            except KeyboardInterrupt:
+                print(f"\n  {COLOR_DIM}Input dibatalkan.{RESET}\n")
+                continue
+            except EOFError:
+                print(f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
+                break
 
             if not user_input:
                 continue
@@ -616,7 +601,7 @@ def main():
                 print(f"\n  {GREEN}Selamat tinggal! Terima kasih menggunakan Lyra CLI.{RESET}\n")
                 break
 
-            elif user_input.lower() == "/help":
+            elif user_input.lower() in ("/", "/help"):
                 render_help()
                 continue
 
@@ -751,7 +736,7 @@ def main():
                         print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
                         break
 
-                    print(f"  {DIM}● Menjalankan tool '{func_name}'...{RESET}")
+                    print(f"\n  {COLOR_DIM}· {tool_activity(func_name, args)}{RESET}")
 
                     if func_name == "list_directory":
                         result = list_directory(
@@ -798,6 +783,9 @@ def main():
                     else:
                         result = f"Error: Tool '{func_name}' tidak dikenal."
 
+                    result_text = str(result).lower()
+                    status = '!' if result_text.startswith(('error', 'gagal')) else '·' if 'dibatalkan' in result_text else '✓'
+                    print(f"  {COLOR_DIM}{status} {tool_activity(func_name, args)}{RESET}\n")
                     messages.append({
                         "role":    "user",
                         "content": f"[Hasil Tool '{func_name}']\n{result}",
@@ -807,7 +795,10 @@ def main():
                     break
 
         except KeyboardInterrupt:
-            print(f"\n\n  {GREEN}Selamat tinggal! Terima kasih menggunakan Lyra CLI.{RESET}\n")
+            print(f"\n  {COLOR_DIM}Dibatalkan. Kamu bisa lanjut mengetik.{RESET}\n")
+            continue
+        except EOFError:
+            print(f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
             break
         except Exception as e:
             print(f"\n  {RED}Kesalahan sistem: {e}{RESET}\n")

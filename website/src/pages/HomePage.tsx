@@ -1,0 +1,21 @@
+import { lazy, Suspense } from 'react';
+import { ArrowDown, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Installation, TerminalPreview } from '../components/Workbench';
+import { models, version } from '../data';
+
+const WorkspaceScene = lazy(() => import('../components/WorkspaceScene'));
+
+export function HomePage() {
+  return <div className="container home">
+    <section className="hero"><div className="hero-copy"><Link to="/changelog" className="release-link"><span className="status-dot" /> v{version}<span className="release-divider">/</span>Catatan versi <ArrowUpRight size={13} /></Link><p className="eyebrow hero-eyebrow">ASISTEN AI DI TERMINAL KAMU</p><h1>Ide, file,<br />dan pekerjaan.<br /><span>Satu terminal.</span></h1><p className="hero-description">Ngobrol dengan Lyra, urus file project, dan simpan hal yang perlu diingat. Langsung dari folder tempat kamu bekerja.</p><div className="hero-actions"><a className="button primary" href="#install">Pasang Amagi <ArrowDown size={16} /></a><Link className="text-link" to="/docs">Baca panduan <ArrowRight size={16} /></Link></div><p className="hero-footnote">Python 3 · macOS, Linux & Windows</p></div><div className="hero-workspace relative min-w-0"><Suspense fallback={<div className="scene-loading workspace-scene" aria-label="Memuat ilustrasi workspace" />}><WorkspaceScene /></Suspense><TerminalPreview /></div></section>
+    <div className="index-strip"><span className="mono">KENALI AMAGI</span><a href="#workflow">01 / Cara kerja <ArrowDown size={13} /></a><a href="#models">02 / Model <ArrowDown size={13} /></a><a href="#install">03 / Instalasi <ArrowDown size={13} /></a></div>
+    <section className="workflow section" id="workflow"><div className="section-heading"><p className="eyebrow">01 / CARA KERJA</p><h2>Mulai dari folder.<br />Lanjutkan dengan percakapan.</h2><p>Amagi menghubungkan percakapan dengan file dan perintah lokal. Respons AI diproses melalui API AstByte Lyra.</p></div><div className="workflow-rows">{[
+      ['01', 'Bekerja di direktori yang tepat.', 'Lihat isi folder, baca file, atau jalankan perintah. Pindah konteks kerja lewat /cd.', '/cd ~/projects'],
+      ['02', 'Catat sekali. Baca lagi nanti.', 'Simpan preferensi dan catatan dalam file Markdown lokal. Isinya disertakan kembali saat mengirim pesan ke Lyra.', '/memory'],
+      ['03', 'Sisakan ruang untuk jeda.', 'Buat pengingat lewat menu interaktif. Daemon berjalan di latar belakang dan mengirim notifikasi saat komputer aktif.', '/reminder'],
+    ].map(([number, title, description, command]) => <div className="workflow-row group transition-colors duration-300 hover:bg-[var(--soft)]" key={number}><span className="row-number">{number}</span><div><h3>{title}</h3><p>{description}</p></div><code>{command}</code></div>)}</div><Link to="/commands" className="text-link section-end">Lihat semua perintah <ArrowRight size={16} /></Link></section>
+    <section className="model-overview section relative" id="models"><div className="section-heading inline-heading"><div><p className="eyebrow">02 / MODEL LYRA</p><h2>Ganti model.<br />Tetap di sesi yang sama.</h2></div><div><p>Empat model tersedia lewat <code>/model</code>. Untuk model dengan penalaran, pilih effort low atau medium.</p><Link to="/models" className="text-link">Lihat pengaturan model <ArrowRight size={16} /></Link></div></div><div className="model-list">{models.map((model, index) => <Link to="/models" className="group transition-colors duration-300 hover:bg-[var(--soft)]" key={model.id}><span className="mono muted">0{index + 1}</span><h3>{model.name}</h3><span className="model-type">{model.default ? 'Model bawaan' : model.reasoning ? 'Dengan penalaran' : 'Tanpa penalaran'}</span><ArrowUpRight size={19} /></Link>)}</div></section>
+    <section className="install-section section" id="install"><div className="section-heading"><p className="eyebrow">03 / MULAI PAKAI</p><h2>Buka terminal.<br />Pasang Amagi.</h2><p>Pilih sistem operasi, salin perintahnya, lalu jalankan di komputermu. Siapkan API key AstByte untuk mulai mengobrol.</p><Link to="/docs" className="text-link">Panduan instalasi lengkap <ArrowRight size={16} /></Link></div><Installation /></section>
+  </div>;
+}

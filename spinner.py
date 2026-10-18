@@ -32,6 +32,9 @@ class Spinner:
             self._i += 1
 
     def start(self):
+        if not sys.stdout.isatty():
+            print('  ' + self.message)
+            return
         self.stop_event.clear()
         self._i    = 0
         self.thread = threading.Thread(target=self._spin, daemon=True)
@@ -42,5 +45,5 @@ class Spinner:
             self.stop_event.set()
             self.thread.join(timeout=1.0)
             # Bersihkan baris spinner
-            sys.stdout.write("\r" + " " * (len(self.message) + 30) + "\r")
+            sys.stdout.write("\r\033[2K")
             sys.stdout.flush()
