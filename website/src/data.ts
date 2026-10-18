@@ -1,5 +1,5 @@
 export const repository = 'https://github.com/mikumimiestu/lyra-ai-cli';
-export const version = '2.3.1';
+export const version = '2.4.0';
 export const installers = [
   { label: 'macOS / Linux', shell: 'Terminal', command: 'curl -sSf https://amagi-cli.astbyte.com/install | bash' },
   { label: 'Windows', shell: 'PowerShell', command: 'iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex' },
@@ -12,6 +12,7 @@ export const models = [
   { name: 'Lyra Eurydice 6', id: 'lyra-eurydice-6', reasoning: true, default: false },
 ];
 export const commands = [
+  { name: '/details', group: 'Sesi & model', description: 'Lihat detail lima aktivitas tool terakhir pada sesi aktif.', example: '/details' },
   { name: '/model', group: 'Sesi & model', description: 'Buka pilihan model Lyra. Pilihan disimpan untuk sesi berikutnya.', example: '/model' },
   { name: '/reasoning', group: 'Sesi & model', description: 'Pilih tingkat penalaran low atau medium.', example: '/reasoning' },
   { name: '/clear', group: 'Sesi & model', description: 'Bersihkan riwayat percakapan pada sesi aktif.', example: '/clear' },

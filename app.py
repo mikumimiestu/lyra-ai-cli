@@ -23,7 +23,7 @@ from styling import (
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
 from spinner import Spinner
-from styling import TerminalInput, COMMANDS, tool_activity
+from styling import TerminalInput, COMMANDS, ActivityLog, prepare_user_message, ui_symbol
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -365,7 +365,7 @@ def stream_ai_response(headers, data, model_info=None):
     if response.status_code != 200:
         return response.status_code, response.text
 
-    print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}Lyra{RESET}")
+    print(f"\n  {COLOR_LYRA}{ui_symbol(chr(0x2726), chr(42))}{RESET} {BOLD}LYRA{RESET}")
     thinking_printed = False
     in_thinking_mode = False
 
@@ -573,6 +573,8 @@ def main():
         "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
     })
 
+    activity = ActivityLog()
+
     # ── Loop utama ────────────────────────────────────────────────────────────
     while True:
         try:
@@ -583,7 +585,6 @@ def main():
                 update_state["notified"] = True
                 print(f"  {YELLOW}⚡ Versi terbaru (v{update_state['latest_version']}) tersedia! Ketik {BOLD}/update{RESET}{YELLOW} untuk memperbarui otomatis.{RESET}\n")
 
-            render_full_divider(COLOR_BORDER)
             try:
                 user_input = editor.read().strip()
             except KeyboardInterrupt:
@@ -603,6 +604,10 @@ def main():
 
             elif user_input.lower() in ("/", "/help"):
                 render_help()
+                continue
+
+            elif user_input.lower() == '/details':
+                activity.show_details()
                 continue
 
             elif user_input.lower() == "/model":
@@ -686,10 +691,17 @@ def main():
                 headers["Authorization"] = f"Bearer {api_key}"
                 continue
 
+            try:
+                message_content = prepare_user_message(user_input, active_cwd)
+            except ValueError as error:
+                print(f"\n  {YELLOW}{error}{RESET}\n")
+                continue
+            activity.begin_turn()
+
             # ── Kirim ke AI ───────────────────────────────────────────────────
             # Selalu perbarui system prompt dengan waktu & memori paling aktual
             messages[0] = {"role": "system", "content": get_current_system_prompt()}
-            messages.append({"role": "user", "content": user_input})
+            messages.append({"role": "user", "content": message_content})
             print()
 
             while True:
@@ -736,7 +748,7 @@ def main():
                         print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
                         break
 
-                    print(f"\n  {COLOR_DIM}· {tool_activity(func_name, args)}{RESET}")
+                    activity.start(func_name, args)
 
                     if func_name == "list_directory":
                         result = list_directory(
@@ -783,9 +795,7 @@ def main():
                     else:
                         result = f"Error: Tool '{func_name}' tidak dikenal."
 
-                    result_text = str(result).lower()
-                    status = '!' if result_text.startswith(('error', 'gagal')) else '·' if 'dibatalkan' in result_text else '✓'
-                    print(f"  {COLOR_DIM}{status} {tool_activity(func_name, args)}{RESET}\n")
+                    activity.finish(func_name, args, result)
                     messages.append({
                         "role":    "user",
                         "content": f"[Hasil Tool '{func_name}']\n{result}",

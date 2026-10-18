@@ -1,7 +1,7 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  ✦ Lyra CLI  v2.3.1
+  [Logo ASCII LYRA CLI asli]  v2.4.0
 
   Lyra Orpheus 6 · reasoning medium
   ~/projects/amagi-cli
@@ -11,6 +11,16 @@
 
   ›
 ```
+
+### Baru di v2.4.0 — Lyra Console
+
+- Logo ASCII gradasi asli dipertahankan. Composer memakai bingkai tipis yang mengikuti panjang pesan, dengan status model, reasoning, direktori, dan branch Git bila tersedia.
+- Ketik `@nama-file` atau `@"nama file.md"` untuk menyertakan file teks UTF-8 ke pesan. Ada autocomplete file/folder. Maksimal 8 file, 128 KB per file, dan 256 KB total; file dibaca hanya saat pesan dikirim.
+- Aktivitas tool dikelompokkan menjadi Eksplorasi, Perubahan, Pengujian, Terminal, atau Konteks. `/details` menampilkan detail lima aktivitas terakhir dari riwayat maksimal 20 aktivitas di memori.
+- Sebelum tool menulis file, tampilkan preview diff merah/hijau. Izin penulisan tetap diminta; preview panjang dibatasi 60 baris dan lebar terminal.
+- `LYRA_ASCII=1` memaksa karakter sederhana. `NO_COLOR=1` mematikan warna; `LYRA_LIGHT_THEME=1` memilih palet untuk background terang. Terminal tanpa editor interaktif tetap memakai input sederhana.
+
+Contoh: `jelaskan @app.py dan @"catatan project.md"`. Isi file yang disebutkan ikut dikirim ke API Lyra; hindari menyertakan file rahasia yang tidak ingin dibagikan ke layanan tersebut.
 
 ### Perbaikan v2.3.1
 
@@ -77,7 +87,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.1.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.0.tar.gz
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -151,7 +161,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.1.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.0.tar.gz
 ```
 
 #### Method 3: Local Clone Installation

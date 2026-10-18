@@ -75,7 +75,8 @@ class EditorTests(unittest.TestCase):
             self.assertEqual(cli_ui.short_path('/home/test2/work'), '/home/test2/work')
 
     def test_activity_never_leaks_file_contents_or_escape_sequences(self):
-        self.assertEqual(cli_ui.tool_activity('write_file', {'filepath': 'demo.py', 'content': 'secret'}), 'Tulis file · demo.py')
+        self.assertIn('demo.py', cli_ui.tool_activity('write_file', {'filepath': 'demo.py', 'content': 'secret'}))
+        self.assertNotIn('secret', cli_ui.tool_activity('write_file', {'filepath': 'demo.py', 'content': 'secret'}))
         self.assertNotIn('\x1b', cli_ui.tool_activity('execute_command', {'command': 'echo\x1b[31m\nhi'}))
 
 
@@ -93,7 +94,7 @@ class AppTests(unittest.TestCase):
 
     def test_original_logo_is_preserved(self):
         output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=100):
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=100), patch.object(styling, 'unicode_terminal', return_value=True):
             styling.print_logo()
         lines = [line for line in styling.strip_ansi(output.getvalue()).splitlines() if line.strip()]
         self.assertEqual(lines, styling.LOGO_LINES)
@@ -141,7 +142,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn('Halo.', text)
         self.assertIn('print(1)', output.getvalue())
-        self.assertIn('Lyra', output.getvalue())
+        self.assertIn('LYRA', output.getvalue())
 
     def test_permissions_still_require_explicit_yes(self):
         import tools

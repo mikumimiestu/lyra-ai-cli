@@ -11,7 +11,7 @@ if _current_dir not in sys.path:
 
 from styling import (
     BOLD, RED, GREEN, YELLOW, COLOR_USER, COLOR_LYRA, COLOR_DIM, RESET, DIM, CYAN,
-    render_permission_box
+    render_permission_box, render_diff_preview
 )
 from spinner import Spinner
 from memory import read_memory, save_memory, clear_memory
@@ -97,6 +97,14 @@ def write_file(filepath, content):
             "Path": abs_path,
             "Ukuran": f"{len(content)} karakter"
         }
+        before = ''
+        if os.path.isfile(abs_path):
+            if os.path.getsize(abs_path) <= 2 * 1024 * 1024:
+                with open(abs_path, 'r', encoding='utf-8', errors='replace') as existing:
+                    before = existing.read()
+            else:
+                print('  File lama lebih dari 2 MB; preview hanya menampilkan konten baru.')
+        render_diff_preview(before, content, filepath)
         if not _confirm_permission("Konfirmasi Tulis File", details):
             return "Aksi menulis file dibatalkan oleh pengguna."
 

@@ -104,7 +104,7 @@ LOGO_LINES = [
 
 def print_logo():
     # Keep the original identity; use a readable wordmark on narrow terminals.
-    if get_terminal_width() < max(len(line) for line in LOGO_LINES) + 2:
+    if not unicode_terminal() or get_terminal_width() < max(len(line) for line in LOGO_LINES) + 2:
         print(f"\n  {BOLD}{COLOR_LYRA}LYRA CLI{RESET}\n")
         return
     max_y = len(LOGO_LINES) - 1
@@ -489,22 +489,17 @@ def render_markdown_table(table_lines, max_width=None):
 # ─── Full-Page Header & Footer Helpers ─────────────────────────────────────────
 
 def render_header(model_name, reasoning_effort, active_cwd, supports_reasoning=True):
-    """A compact welcome with real model, version, and working directory."""
+    """The original logo sits above a quiet, project-focused console header."""
     from config import VERSION
     width = max(12, min(get_terminal_width() - 4, 88))
     reasoning = 'reasoning ' + reasoning_effort if supports_reasoning else 'tanpa reasoning'
-    print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}{COLOR_TITLE}Lyra CLI{RESET}  {COLOR_DIM}v{VERSION}{RESET}\n")
-    for text in (f'{model_name} · {reasoning}', short_path(active_cwd)):
+    lines = [f'v{VERSION}  /  AstByte', '', short_path(active_cwd),
+             f'{model_name} {ui_symbol("·", "/")} {reasoning}']
+    print()
+    for text in lines:
         for line in wrap_text_display_width(text, width):
             print(f"  {COLOR_DIM}{line}{RESET}")
-    print(f"\n  {COLOR_TITLE}Mau ngerjain apa hari ini?{RESET}")
-    hint = 'Jelaskan tugasnya, atau ketik / untuk lihat perintah.'
-    for line in wrap_text_display_width(hint, width):
-        print(f"  {COLOR_DIM}{line}{RESET}")
-    hint = ('Enter kirim · Alt+Enter baris baru · Ctrl+D keluar'
-            if EDITOR_AVAILABLE and sys.stdin.isatty() else 'Enter kirim · /help bantuan · exit keluar')
-    for line in wrap_text_display_width(hint, width):
-        print(f"  {COLOR_DIM}{line}{RESET}")
+    print(f"\n  {COLOR_TITLE}Mau bikin apa hari ini?{RESET}")
     print()
 
 
@@ -555,6 +550,7 @@ def format_thinking_line_bubble(line, width=None):
 
 # ─── Interactive command editor ──────────────────────────────────────────────
 COMMANDS = [
+    ('/details', 'Buka detail aktivitas terakhir'),
     ('/model', 'Pilih model Lyra'),
     ('/reasoning', 'Atur penalaran low / medium'),
     ('/memory', 'Lihat dan kelola catatan'),
@@ -582,10 +578,12 @@ def short_path(directory):
     return directory
 
 
-def toolbar_text(model, effort, directory, supports_reasoning=True):
+def toolbar_text(model, effort, directory, supports_reasoning=True, branch=None):
     model = model.removeprefix('Lyra ') if hasattr(str, 'removeprefix') else model.replace('Lyra ', '', 1)
     reasoning = effort if supports_reasoning else 'tanpa reasoning'
-    return '{} · {}  |  {}'.format(model, reasoning, short_path(directory))
+    separator = ui_symbol('·', '/')
+    location = short_path(directory) + (' / ' + branch if branch else '')
+    return '{} {} {}  |  {}'.format(model, separator, reasoning, location)
 
 
 try:
@@ -595,12 +593,27 @@ try:
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style
     from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.layout.containers import HSplit, to_container
+    from prompt_toolkit.widgets import Frame
     EDITOR_AVAILABLE = True
 except ImportError:
     EDITOR_AVAILABLE = False
 
 
 if EDITOR_AVAILABLE:
+    class ConsoleSession(PromptSession):
+        def _frame_height(self):
+            columns = self.app.output.get_size().columns if hasattr(self, 'app') else get_terminal_width()
+            width = max(1, columns - 6)
+            rows = sum(max(1, (str_width(line) + width - 1) // width) for line in self.default_buffer.document.lines)
+            return min(8, rows + 2)
+
+        def _create_layout(self):
+            layout = super()._create_layout()
+            if unicode_terminal() and isinstance(layout.container, HSplit):
+                layout.container.children[0] = to_container(Frame(layout.container.children[0], title='pesan', style='class:composer', height=self._frame_height))
+            return layout
+
     class SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
@@ -616,6 +629,7 @@ class TerminalInput:
         self.context = context
         self.session = None
         self._bindings = None
+        self.branch = None
         # Pipes and dumb terminals keep the plain text input path.
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'
         if EDITOR_AVAILABLE and (interactive or input_stream is not None):
@@ -632,22 +646,25 @@ class TerminalInput:
                 if buffer.complete_state:
                     buffer.complete_next()
                     return
-                matches = list(SlashCompleter().get_completions(buffer.document, None))
+                matches = list(self.completer.get_completions(buffer.document, None))
                 if len(matches) == 1:
                     buffer.apply_completion(matches[0])
                 elif matches:
                     buffer.start_completion(select_first=True)
 
             self._bindings = bindings
-            self.session = PromptSession(
+            self.completer = WorkspaceCompleter(lambda: self.context()['directory'])
+            self.session = ConsoleSession(
                 history=InMemoryHistory(),
-                completer=SlashCompleter(),
+                completer=self.completer,
                 complete_while_typing=True,
                 key_bindings=bindings,
                 bottom_toolbar=self._toolbar,
-                prompt_continuation='    ',
+                prompt_continuation='  ',
                 style=Style.from_dict({
                     'bottom-toolbar': 'noreverse',
+                    'composer.border': '#7d708f' if IS_DARK else '#88789a',
+                    'composer.label': '#b6a0dc' if IS_DARK else '#7c3aed',
                     'completion-menu.completion': 'bg:#292b30 #d6d7df',
                     'completion-menu.completion.current': 'bg:#514568 #ffffff',
                     'completion-menu.meta.completion': 'bg:#292b30 #a8a8b5',
@@ -655,25 +672,34 @@ class TerminalInput:
                 }),
                 input=input_stream,
                 output=output_stream,
-                reserve_space_for_menu=5,
+                reserve_space_for_menu=3,
             )
 
     def _toolbar(self):
         context = self.context()
-        text = toolbar_text(**context)
+        text = toolbar_text(**context, branch=self.branch)
         width = max(1, get_terminal_width() - 4)
-        if len(text) > width:
-            text = text[:max(0, width - 1)] + '…'
-        return ANSI('  {}{}{}'.format(COLOR_DIM, text, RESET))
+        hints = '/ perintah   @ file   Alt+Enter baris baru'
+        return ANSI('  {}{}\n  {}{}'.format(COLOR_DIM, fit_console_text(text, width), fit_console_text(hints, width), RESET))
 
     def read(self):
-        prompt = '  {}{}›{} '.format(BOLD, COLOR_LYRA, RESET)
+        marker = ui_symbol('›', '>')
+        prompt = ' {}{}{}{} '.format(BOLD, COLOR_LYRA, marker, RESET)
+        self.branch = workspace_branch(self.context().get('directory', os.getcwd()))
         if self.session is None:
-            return input(prompt)
-        return self.session.prompt(
-            ANSI(prompt),
-            rprompt=ANSI('{} / perintah{}'.format(COLOR_DIM, RESET)),
-        )
+            border = '+' + '-' * max(3, min(get_terminal_width() - 5, 84))
+            print('  ' + border + ' pesan')
+            try:
+                return input(prompt)
+            finally:
+                print('  ' + border)
+        if not unicode_terminal():
+            prompt = '+-- pesan --\n' + prompt
+        try:
+            return self.session.prompt(ANSI(prompt))
+        finally:
+            if not unicode_terminal():
+                print('+--' + '-' * max(1, min(get_terminal_width() - 5, 84)))
 
 
 def tool_activity(name, arguments):
@@ -696,4 +722,178 @@ def tool_activity(name, arguments):
     value = str(arguments.get(key, '')) if key else ''
     # Keep paths and multiline scripts from injecting control sequences in labels.
     value = ''.join(char if char.isprintable() else ' ' for char in value)
-    return '{}{}{}'.format(label, ' · ' if value else '', value[:90] + ('…' if len(value) > 90 else ''))
+    return '{}{}{}'.format(label, ' ' + ui_symbol('·', '/') + ' ' if value else '', value[:90] + ('…' if len(value) > 90 else ''))
+
+
+# ─── Console capabilities and file context ───────────────────────────────────
+def unicode_terminal():
+    if os.environ.get('LYRA_ASCII', '').lower() in ('1', 'true', 'yes') or os.environ.get('TERM') == 'dumb':
+        return False
+    try:
+        '╭─✦✓'.encode(sys.stdout.encoding or getattr(sys.__stdout__, 'encoding', None) or 'utf-8')
+        return True
+    except (UnicodeError, LookupError):
+        return False
+
+
+def ui_symbol(symbol, fallback):
+    return symbol if unicode_terminal() else fallback
+
+
+def fit_console_text(text, width):
+    text = ''.join(char for char in str(text) if char.isprintable())
+    if str_width(text) <= width:
+        return text
+    suffix = ui_symbol('…', '~')
+    result = ''
+    for char in text:
+        if str_width(result + char + suffix) > width:
+            break
+        result += char
+    return result + suffix if width else ''
+
+
+def workspace_branch(directory):
+    import subprocess
+    try:
+        result = subprocess.run(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+                                cwd=directory, capture_output=True, text=True, timeout=0.5)
+        return fit_console_text(result.stdout.strip(), 32) if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+REFERENCE_PATTERN = re.compile(r'(?<!\S)@(?:"([^"\n]+)"|\'([^\'\n]+)\'|([^\s]+))')
+
+
+def prepare_user_message(text, directory):
+    """Attach only explicitly mentioned text files, bounded before any API call."""
+    attachments = []
+    seen = set()
+    total = 0
+    for match in REFERENCE_PATTERN.finditer(text):
+        reference = next(value for value in match.groups() if value is not None)
+        filename = os.path.abspath(os.path.join(directory, os.path.expanduser(reference)))
+        real = os.path.normcase(os.path.realpath(filename))
+        if real in seen:
+            continue
+        if len(seen) >= 8:
+            raise ValueError('Maksimal 8 referensi file per pesan.')
+        try:
+            with open(filename, 'rb') as handle:
+                data = handle.read(128 * 1024 + 1)
+        except OSError as error:
+            raise ValueError(f'Tidak bisa membaca @{reference}: {error.strerror}') from error
+        if len(data) > 128 * 1024 or total + len(data) > 256 * 1024:
+            raise ValueError('Referensi terlalu besar: maksimal 128 KB per file dan 256 KB per pesan.')
+        if b'\0' in data:
+            raise ValueError(f'@{reference} adalah file biner. Gunakan file teks.')
+        try:
+            content = data.decode('utf-8-sig')
+        except UnicodeDecodeError as error:
+            raise ValueError(f'@{reference} bukan teks UTF-8.') from error
+        attachments.append(f'\n[Referensi file: {reference}]\n{content}\n[Akhir referensi file]')
+        total += len(data)
+        seen.add(real)
+    return text + ('\n' + '\n'.join(attachments) if attachments else '')
+
+
+if EDITOR_AVAILABLE:
+    class WorkspaceCompleter(SlashCompleter):
+        def __init__(self, directory):
+            self.directory = directory
+
+        def get_completions(self, document, complete_event):
+            yield from super().get_completions(document, complete_event)
+            match = re.search(r'(?:^|\s)@("?)([^"\n]*)$', document.text_before_cursor)
+            if not match:
+                return
+            quote, partial = match.groups()
+            if not quote and any(char.isspace() for char in partial):
+                return
+            expanded = os.path.expanduser(partial)
+            parent, prefix = os.path.split(expanded)
+            folder = os.path.join(self.directory(), parent)
+            try:
+                with os.scandir(folder) as entries:
+                    choices = sorted((entry.name, entry.is_dir()) for entry in entries
+                                     if entry.name.lower().startswith(prefix.lower()) and not entry.name.startswith('.'))[:60]
+            except OSError:
+                return
+            for name, is_directory in choices:
+                suggestion = os.path.join(os.path.dirname(partial), name)
+                if is_directory:
+                    suggestion += os.sep
+                needs_quotes = bool(quote or ' ' in suggestion)
+                value = '@' + ('"' + suggestion + ('"' if not is_directory else '') if needs_quotes else suggestion)
+                length = len(partial) + len(quote) + 1
+                yield Completion(value, start_position=-length, display=name + (os.sep if is_directory else ''),
+                                 display_meta='folder' if is_directory else 'sertakan file')
+
+
+# ─── Activity groups and change previews ─────────────────────────────────────
+def activity_group(name, arguments):
+    if name in ('list_directory', 'read_file'):
+        return 'Eksplorasi'
+    if name in ('write_file', 'create_directory', 'init_project'):
+        return 'Perubahan'
+    if name == 'execute_command':
+        command = str(arguments.get('command', ''))
+        return 'Pengujian' if re.search(r'\b(pytest|unittest|vitest|jest)\b|\bnpm (?:run )?test\b', command) else 'Terminal'
+    return 'Konteks'
+
+
+class ActivityLog:
+    def __init__(self):
+        self.entries = []
+        self.group = None
+
+    def begin_turn(self):
+        self.group = None
+
+    def start(self, name, arguments):
+        group = activity_group(name, arguments)
+        if group != self.group:
+            print(f'\n  {BOLD}{COLOR_DIM}{group}{RESET}')
+            self.group = group
+        label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
+        print(f'    {COLOR_DIM}{ui_symbol("·", ".")} {label}{RESET}')
+
+    def finish(self, name, arguments, result):
+        text = str(result)
+        clean = text.lstrip('❌✖⚠️ ').lower()
+        exit_code = re.search(r'Exit Code:\s*(-?\d+)', text)
+        failed = clean.startswith(('error', 'gagal')) or (exit_code and int(exit_code.group(1)) != 0)
+        cancelled = 'dibatalkan' in clean
+        status = '!' if failed else '-' if cancelled else ui_symbol('✓', 'OK')
+        color = RED if failed else COLOR_DIM if cancelled else GREEN
+        label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
+        print(f'    {color}{status}{RESET} {label}')
+        self.entries.append((label, text[:12000]))
+        self.entries = self.entries[-20:]
+
+    def show_details(self):
+        print(f'\n  {BOLD}Detail aktivitas terakhir{RESET}')
+        if not self.entries:
+            print('  Belum ada aktivitas tool.')
+        for label, text in self.entries[-5:]:
+            print(f'\n  {COLOR_LYRA}{label}{RESET}')
+            for line in text.splitlines()[:50]:
+                print('    ' + fit_console_text(line, max(8, get_terminal_width() - 6)))
+            if len(text.splitlines()) > 50 or len(text) >= 12000:
+                print('    [detail dipotong]')
+        print()
+
+
+def render_diff_preview(before, after, filename):
+    import difflib
+    lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                    fromfile=filename + ' (sebelum)', tofile=filename + ' (sesudah)', lineterm=''))
+    print(f'\n  {BOLD}Preview perubahan{RESET}')
+    if not lines:
+        print('    Tidak ada perubahan baris teks.')
+    for line in lines[:60]:
+        color = GREEN if line.startswith('+') else RED if line.startswith('-') else COLOR_DIM
+        print(f'    {color}{fit_console_text(line, max(8, get_terminal_width() - 6))}{RESET}')
+    if len(lines) > 60:
+        print(f'    [preview dipotong; {len(lines) - 60} baris lainnya]')
