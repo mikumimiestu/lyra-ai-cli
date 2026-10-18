@@ -393,12 +393,6 @@ class VisibleResponseFilter:
 
 
 def stream_ai_response(headers, data, model_info=None):
-    model = model_info or {}
-    effort = data.get('reasoning_effort', 'medium')
-    label = f'reasoning {effort}' if model.get('supports_reasoning', True) else 'tanpa reasoning'
-    context = f"{model.get('name', 'Lyra')} {ui_symbol('·', '/')} {label}"
-    print(f"\n  {COLOR_LYRA}{ui_symbol('✦', '*')}{RESET} {BOLD}LYRA{RESET}")
-    print(f"    {COLOR_DIM}{fit_console_text(context, max(1, get_terminal_width() - 5))}{RESET}")
     spinner = Spinner('Menunggu respons...')
     response = None
     chunks = []
@@ -407,6 +401,20 @@ def stream_ai_response(headers, data, model_info=None):
     table_buffer = []
     markdown_state = {'in_code': False, 'lang': ''}
     visible_started = False
+    bullet_done = False
+
+    def with_bullet(formatted):
+        """The answer opens with a Lyra bullet in the left margin, like other agent CLIs."""
+        nonlocal bullet_done
+        if bullet_done or not formatted.strip():
+            return formatted
+        bullet_done = True
+        lines = formatted.split('\n')
+        for i, text in enumerate(lines):
+            if text.strip():
+                lines[i] = f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {text[2:] if text.startswith('  ') else text}"
+                break
+        return '\n'.join(lines)
 
     def flush_table():
         if table_buffer:
@@ -421,7 +429,7 @@ def stream_ai_response(headers, data, model_info=None):
         else:
             flush_table()
             formatted, markdown_state = format_markdown_line(line, markdown_state)
-            print(formatted)
+            print(with_bullet(formatted))
         sys.stdout.flush()
 
     def display(text):

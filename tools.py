@@ -24,9 +24,9 @@ def _confirm_permission(action_title, details):
     """Meminta izin eksekusi pengguna dengan UI box yang elegan."""
     try:
         render_permission_box(action_title, details)
-        answer = input(f"  {BOLD}{YELLOW}Izinkan eksekusi ini? (y/n) ❯ {RESET}").strip().lower()
+        answer = input(f"  {BOLD}{YELLOW}Izinkan? (y/n) ❯ {RESET}").strip().lower()
         print()
-        return answer == 'y'
+        return answer in ('y', 'ya', 'yes')
     except (EOFError, KeyboardInterrupt):
         print()
         return False

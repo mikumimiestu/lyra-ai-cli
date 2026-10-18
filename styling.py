@@ -57,6 +57,7 @@ RESET  = "\033[0m"
 BOLD   = "\033[1m"
 DIM    = "\033[2m"
 ITALIC = "\033[3m"
+UNDERLINE = "\033[4m"
 
 # ─── Adaptive Colors ─────────────────────────────────────────────────────────
 # Pada dark theme pakai warna terang, pada light theme pakai warna lebih gelap
@@ -89,7 +90,7 @@ else:
 # Respect redirected output and explicit plain-text mode.
 if not sys.stdout.isatty() or 'NO_COLOR' in os.environ or os.environ.get('TERM') == 'dumb':
     for _name in ('RESET', 'BOLD', 'DIM', 'ITALIC', 'WHITE', 'GREEN', 'RED', 'YELLOW', 'CYAN',
-                  'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
+                  'UNDERLINE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
         globals()[_name] = ''
 
 # ─── Logo ─────────────────────────────────────────────────────────────────────
@@ -171,35 +172,50 @@ def str_width(text):
     return sum(char_width(c) for c in clean)
 
 
-# ─── Permission Box UI ────────────────────────────────────────────────────────
-# ─── Permission Box UI ────────────────────────────────────────────────────────
+# ─── Rounded boxes (welcome card, permission dialog) ─────────────────────────
+def box_width(maximum=88, minimum=24):
+    return max(minimum, min(get_terminal_width() - 4, maximum))
+
+
+def render_box(lines, width, color=None, title=''):
+    """Rounded box in the style of modern agent CLIs. `lines` are pre-wrapped to width - 4."""
+    color = COLOR_BORDER if color is None else color
+    if unicode_terminal():
+        tl, tr, bl, br, h, v = '╭', '╮', '╰', '╯', '─', '│'
+    else:
+        tl, tr, bl, br, h, v = '+', '+', '+', '+', '-', '|'
+    inner = width - 2
+    if title:
+        label = f' {title} '
+        top = f'{color}{tl}{h}{RESET}{label}{color}{h * max(1, inner - 1 - str_width(label))}{tr}{RESET}'
+    else:
+        top = f'{color}{tl}{h * inner}{tr}{RESET}'
+    out = [top]
+    for text in lines:
+        pad = max(0, width - 4 - str_width(text))
+        out.append(f'{color}{v}{RESET} {text}{" " * pad} {color}{v}{RESET}')
+    out.append(f'{color}{bl}{h * inner}{br}{RESET}')
+    return out
+
+
 def render_permission_box(title, details):
-    """Render konfirmasi izin eksekusi hanya dengan garis atas & bawah (tanpa garis samping)."""
-    term_w = get_terminal_width()
-    w = min(term_w - 8, 70)
-    B, T, A, Y, R, D = COLOR_BORDER, COLOR_TITLE, COLOR_ACCENT, YELLOW, RESET, COLOR_DIM
-
-    title_str = f" 🛡️  {BOLD}{Y}{title}{R} "
-    pad_title = max(4, w - str_width(title_str) - 2)
-    top_b = "─" * pad_title
-    
-    print(f"\n  {B}──{title_str}{B}{top_b}{R}")
-
-    for k, v in details.items():
-        v_str = str(v)
-        if "\n" in v_str:
-            print(f"    {D}{k:<10}:{R}")
-            v_lines = v_str.split("\n")
-            for sub_l in v_lines:
-                if not sub_l.strip():
-                    continue
-                highlighted = highlight_syntax(sub_l)
-                print(f"      {highlighted}")
-        else:
-            highlighted = highlight_syntax(v_str) if k.lower() in ("command", "script", "perintah") else f"{BOLD}{WHITE}{v_str}{R}"
-            print(f"    {D}{k:<10}:{R} {highlighted}")
-
-    print(f"  {B}{'─' * w}{R}")
+    """Rounded confirmation dialog. Commands are shown in full so nothing is approved unseen."""
+    width = box_width(88)
+    room = width - 4
+    key_w = max((len(str(k)) for k in details), default=8) + 2
+    body = []
+    for key, value in details.items():
+        is_code = str(key).lower() in ('command', 'script', 'perintah')
+        chunks = [part for part in str(value).split('\n') if part.strip()] or ['']
+        for n, chunk in enumerate(chunks):
+            for m, piece in enumerate(wrap_text_display_width(chunk, max(8, room - key_w))):
+                label = f'{COLOR_DIM}{str(key):<{key_w}}{RESET}' if n == 0 and m == 0 else ' ' * key_w
+                shown = highlight_syntax(piece) if is_code else f'{BOLD}{piece}{RESET}'
+                body.append(label + shown)
+    caution = ui_symbol('⚠', '!')
+    print()
+    for line in render_box(body, width, color=YELLOW, title=f'{BOLD}{YELLOW}{caution} {title}{RESET}'):
+        print('  ' + line)
 
 
 # ─── Markdown Renderer & Code Highlighting ────────────────────────────────────
@@ -264,49 +280,37 @@ def format_markdown_line(line, state):
             state['in_code'] = True
             lang = stripped[3:].strip()
             state['lang'] = lang
-            lang_label = f" [{lang.upper()}]" if lang else ""
-            w = min(get_terminal_width() - 8, 70)
-            top_border = f"  {COLOR_BORDER}── Code{lang_label} {'─' * max(4, w - str_width(lang_label) - 9)}{RESET}"
-            return top_border, state
-        else:
-            state['in_code'] = False
-            state['lang'] = ""
-            w = min(get_terminal_width() - 8, 70)
-            bot_border = f"  {COLOR_BORDER}{'─' * w}{RESET}"
-            return bot_border, state
+            return f"  {COLOR_BORDER}{ui_symbol('╭─', '+-')}{RESET} {COLOR_DIM}{lang or 'code'}{RESET}", state
+        state['in_code'] = False
+        state['lang'] = ""
+        return f"  {COLOR_BORDER}{ui_symbol('╰─', '+-')}{RESET}", state
 
     if state['in_code']:
         highlighted = highlight_syntax(line, state['lang'])
-        return f"    {highlighted}", state
-
+        return f"  {COLOR_BORDER}{ui_symbol('│', '|')}{RESET} {highlighted}", state
 
     # Headers
     if line.startswith("# "):
-        header = line[2:].strip()
-        return f"\n  {BOLD}{COLOR_LYRA}✦ {header.upper()}{RESET}\n  {COLOR_BORDER}{'─' * max(10, len(header) + 4)}{RESET}", state
+        return f"\n  {BOLD}{UNDERLINE}{COLOR_TITLE}{line[2:].strip()}{RESET}", state
     elif line.startswith("## "):
-        header = line[3:].strip()
-        return f"\n  {BOLD}{COLOR_TITLE}# {header}{RESET}", state
+        return f"\n  {BOLD}{COLOR_TITLE}{line[3:].strip()}{RESET}", state
     elif line.startswith("### "):
-        header = line[4:].strip()
-        return f"\n  {BOLD}{COLOR_ACCENT}▶ {header}{RESET}", state
+        return f"\n  {BOLD}{COLOR_LYRA}{line[4:].strip()}{RESET}", state
 
     # Lists
-    if re.match(r'^\s*[-*+]\s+', line):
-        content = re.sub(r'^\s*[-*+]\s+', '', line)
-        formatted = format_inline_markdown(content)
-        return f"  {COLOR_LYRA}●{RESET} {formatted}", state
-    elif re.match(r'^\s*\d+\.\s+', line):
-        match = re.match(r'^\s*(\d+)\.\s+(.*)', line)
-        if match:
-            num, content = match.group(1), match.group(2)
-            formatted = format_inline_markdown(content)
-            return f"  {COLOR_USER}{num}.{RESET} {formatted}", state
+    bullet = re.match(r'^(\s*)[-*+]\s+(.*)', line)
+    if bullet:
+        indent = ' ' * (len(bullet.group(1).replace('\t', '  ')) // 2 * 2)
+        return f"  {indent}{COLOR_LYRA}{ui_symbol('•', '-')}{RESET} {format_inline_markdown(bullet.group(2))}", state
+    numbered = re.match(r'^(\s*)(\d+)\.\s+(.*)', line)
+    if numbered:
+        indent = ' ' * (len(numbered.group(1).replace('\t', '  ')) // 2 * 2)
+        return f"  {indent}{COLOR_LYRA}{numbered.group(2)}.{RESET} {format_inline_markdown(numbered.group(3))}", state
 
     # Blockquotes
     if line.startswith("> "):
         content = format_inline_markdown(line[2:])
-        return f"  {COLOR_DIM}│ {ITALIC}{content}{RESET}", state
+        return f"  {COLOR_DIM}{ui_symbol('▎', '|')} {ITALIC}{content}{RESET}", state
 
     # Horizontal Rule
     if stripped in ("---", "***", "___"):
@@ -489,17 +493,23 @@ def render_markdown_table(table_lines, max_width=None):
 # ─── Full-Page Header & Footer Helpers ─────────────────────────────────────────
 
 def render_header(model_name, reasoning_effort, active_cwd, supports_reasoning=True):
-    """The original logo sits above a quiet, project-focused console header."""
+    """Logo stays above; a rounded welcome card (Claude/Codex style) carries the session context."""
     from config import VERSION
-    width = max(12, min(get_terminal_width() - 4, 88))
+    width = box_width(72, 28)
+    room = width - 4
     reasoning = 'reasoning ' + reasoning_effort if supports_reasoning else 'tanpa reasoning'
-    lines = [f'v{VERSION}  /  AstByte', '', short_path(active_cwd),
-             f'{model_name} {ui_symbol("·", "/")} {reasoning}']
+    sep = ui_symbol('·', '/')
+    body = [
+        f'{COLOR_TITLE}Mau ngerjain apa hari ini?{RESET}',
+        f'{COLOR_DIM}{fit_console_text(model_name + " " + sep + " " + reasoning, room)}{RESET}',
+        f'{COLOR_DIM}{fit_console_text(short_path(active_cwd), room)}{RESET}',
+    ]
+    title = f'{BOLD}{COLOR_LYRA}{ui_symbol("✦", "*")} Lyra CLI{RESET} {COLOR_DIM}v{VERSION}{RESET}'
     print()
-    for text in lines:
-        for line in wrap_text_display_width(text, width):
-            print(f"  {COLOR_DIM}{line}{RESET}")
-    print(f"\n  {COLOR_TITLE}Mau bikin apa hari ini?{RESET}")
+    for line in render_box(body, width, color=COLOR_BORDER, title=title):
+        print('  ' + line)
+    tips = f'/ perintah {sep} @ file {sep} Alt+Enter baris baru {sep} /help'
+    print(f"  {COLOR_DIM}{fit_console_text(tips, width)}{RESET}")
     print()
 
 
@@ -598,6 +608,7 @@ try:
     from prompt_toolkit.data_structures import Size
     from prompt_toolkit.filters import Condition
     from prompt_toolkit.widgets import Frame
+    from prompt_toolkit.widgets.base import Border
     EDITOR_AVAILABLE = True
 except ImportError:
     EDITOR_AVAILABLE = False
@@ -628,11 +639,24 @@ if EDITOR_AVAILABLE:
             minimum = self._get_default_buffer_control_height().min
             return min(8, max(rows, minimum, 1) + 2)
 
+        def _rounded_frame(self, body):
+            # prompt_toolkit's Frame reads its corner glyphs at construction time.
+            glyphs = {'TOP_LEFT': '╭', 'TOP_RIGHT': '╮', 'BOTTOM_LEFT': '╰', 'BOTTOM_RIGHT': '╯'}
+            saved = {name: getattr(Border, name) for name in glyphs}
+            try:
+                if unicode_terminal():
+                    for name, glyph in glyphs.items():
+                        setattr(Border, name, glyph)
+                return Frame(body, style='class:composer', height=self._frame_height)
+            finally:
+                for name, glyph in saved.items():
+                    setattr(Border, name, glyph)
+
         def _create_layout(self):
             layout = super()._create_layout()
             if isinstance(layout.container, HSplit):
                 body = layout.container.children[0]
-                frame = Frame(body, title='pesan', style='class:composer', height=self._frame_height)
+                frame = self._rounded_frame(body)
                 framed_body = to_container(frame)
                 layout.container.children[0] = DynamicContainer(lambda: framed_body if self._can_frame() else body)
                 toolbar = layout.container.children[-1]
@@ -689,6 +713,7 @@ class TerminalInput:
                 prompt_continuation='  ',
                 style=Style.from_dict({
                     'bottom-toolbar': 'noreverse',
+                    'frame.border': '#8b7bb8' if IS_DARK else '#7c3aed',
                     'composer.border': '#7d708f' if IS_DARK else '#88789a',
                     'composer.label': '#b6a0dc' if IS_DARK else '#7c3aed',
                     'completion-menu.completion': 'bg:#292b30 #d6d7df',
@@ -706,8 +731,12 @@ class TerminalInput:
         text = toolbar_text(**context, branch=self.branch)
         columns = self.session.app.output.get_size().columns if self.session else get_terminal_width()
         width = max(1, columns - 4)
-        hints = '/ perintah   @ file   Alt+Enter baris baru'
-        return ANSI('  {}{}\n  {}{}'.format(COLOR_DIM, fit_console_text(text, width), fit_console_text(hints, width), RESET))
+        sep = ui_symbol('·', '/')
+        hints = f'/ perintah {sep} @ file {sep} Alt+Enter baris baru'
+        left = fit_console_text(text, width)
+        gap = width - str_width(left) - str_width(hints)
+        line = left + ' ' * gap + hints if gap >= 3 else left
+        return ANSI('  {}{}{}'.format(COLOR_DIM, line, RESET))
 
     def read(self):
         marker = ui_symbol('›', '>')
@@ -729,12 +758,12 @@ class TerminalInput:
                 print('+--' + '-' * max(1, min(get_terminal_width() - 5, 84)))
 
 
-def tool_activity(name, arguments):
-    """Describe only paths/commands useful to the user, never file contents."""
+def tool_call_parts(name, arguments):
+    """(label, value) for a tool call; value is only a path/command, never file contents."""
     labels = {
         'list_directory': ('Lihat folder', 'path'),
         'read_file': ('Baca', 'filepath'),
-        'write_file': ('Tulis file', 'filepath'),
+        'write_file': ('Tulis', 'filepath'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
         'init_project': ('Buat project', 'project_name'),
@@ -749,7 +778,12 @@ def tool_activity(name, arguments):
     value = str(arguments.get(key, '')) if key else ''
     # Keep paths and multiline scripts from injecting control sequences in labels.
     value = ''.join(char if char.isprintable() else ' ' for char in value)
-    return '{}{}{}'.format(label, ' ' + ui_symbol('·', '/') + ' ' if value else '', value[:90] + ('…' if len(value) > 90 else ''))
+    return label, value[:90] + ('…' if len(value) > 90 else '')
+
+
+def tool_activity(name, arguments):
+    label, value = tool_call_parts(name, arguments)
+    return '{}{}{}'.format(label, ' ' + ui_symbol('·', '/') + ' ' if value else '', value)
 
 
 # ─── Console capabilities and file context ───────────────────────────────────
@@ -870,6 +904,30 @@ def activity_group(name, arguments):
     return 'Konteks'
 
 
+def _result_summary(name, text, failed, cancelled):
+    """One short line describing what a tool did (Claude-style result line)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    first = lines[0].lstrip('✅❌✖⚠️ ') if lines else ''
+    if cancelled:
+        return 'Dibatalkan'
+    if name == 'execute_command':
+        code = re.search(r'Exit Code:\s*(-?\d+)', text)
+        return ('Gagal · exit ' if failed else 'Selesai · exit ') + (code.group(1) if code else '?')
+    if failed:
+        return first or 'Gagal'
+    if name == 'read_file':
+        return 'Membaca {} baris'.format(len(text.splitlines()))
+    if name == 'list_directory':
+        return '{} entri'.format(len(lines))
+    return first or 'Selesai'
+
+
+def _output_preview(text, limit=4):
+    """First few lines of command output, without the STDOUT/STDERR markers."""
+    body = [line for line in text.splitlines()[1:] if line.strip() and line.strip() not in ('STDOUT:', 'STDERR:')]
+    return body[:limit], max(0, len(body) - limit)
+
+
 class ActivityLog:
     def __init__(self):
         self.entries = []
@@ -886,26 +944,33 @@ class ActivityLog:
         self.read_files = set()
 
     def start(self, name, arguments):
-        group = activity_group(name, arguments)
-        if group != self.group:
-            print(f'\n  {BOLD}{COLOR_DIM}{group}{RESET}')
-            self.group = group
-        label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
-        print(f'    {COLOR_DIM}{ui_symbol("·", ".")} {label}{RESET}')
+        self.group = activity_group(name, arguments)
+        label, value = tool_call_parts(name, arguments)
+        room = max(8, get_terminal_width() - 4)
+        shown = fit_console_text(value, max(1, room - str_width(label) - 2)) if value else ''
+        detail = f'{COLOR_DIM}({shown}){RESET}' if value else ''
+        print(f'\n{COLOR_LYRA}{ui_symbol("●", "*")}{RESET} {BOLD}{label}{RESET}{detail}')
 
     def finish(self, name, arguments, result):
         text = str(result)
         clean = text.lstrip('❌✖⚠️ ').lower()
         exit_code = re.search(r'Exit Code:\s*(-?\d+)', text)
-        failed = clean.startswith(('error', 'gagal')) or (exit_code and int(exit_code.group(1)) != 0)
+        failed = clean.startswith(('error', 'gagal')) or bool(exit_code and int(exit_code.group(1)) != 0)
         cancelled = 'dibatalkan' in clean
         if name == 'read_file' and not failed and not cancelled:
             self.read_files.add(os.path.normcase(os.path.abspath(str(arguments.get('filepath', '')))))
             self.files_read = len(self.read_files)
-        status = '!' if failed else '-' if cancelled else ui_symbol('✓', 'OK')
-        color = RED if failed else COLOR_DIM if cancelled else GREEN
+        color = RED if failed else COLOR_DIM if cancelled else COLOR_DIM
+        summary = fit_console_text(_result_summary(name, text, failed, cancelled), max(8, get_terminal_width() - 8))
+        connector = ui_symbol('⎿', 'L')
+        print(f'  {COLOR_DIM}{connector}{RESET}  {color}{summary}{RESET}')
+        if name == 'execute_command' and not cancelled:
+            preview, more = _output_preview(text)
+            for line in preview:
+                print(f'     {COLOR_DIM}{fit_console_text(line, max(8, get_terminal_width() - 8))}{RESET}')
+            if more:
+                print(f'     {COLOR_DIM}… +{more} baris (/details){RESET}')
         label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
-        print(f'    {color}{status}{RESET} {label}')
         self.entries.append((label, text[:12000]))
         self.entries = self.entries[-20:]
 
@@ -918,31 +983,69 @@ class ActivityLog:
         text = f'Selesai {separator} {elapsed:.0f}s'
         if self.files_read:
             text += f' {separator} {self.files_read} file dibaca'
-        print(f'\n  {COLOR_DIM}{text}{RESET}\n')
+        print(f'\n{COLOR_DIM}{ui_symbol("✻", "*")} {text}{RESET}\n')
         self.started_at = None
 
     def show_details(self):
-        print(f'\n  {BOLD}Detail aktivitas terakhir{RESET}')
+        print(f'\n{COLOR_LYRA}{ui_symbol("●", "*")}{RESET} {BOLD}Detail aktivitas terakhir{RESET}')
         if not self.entries:
-            print('  Belum ada aktivitas tool.')
+            print(f'  {COLOR_DIM}Belum ada aktivitas tool.{RESET}')
         for label, text in self.entries[-5:]:
             print(f'\n  {COLOR_LYRA}{label}{RESET}')
             for line in text.splitlines()[:50]:
-                print('    ' + fit_console_text(line, max(8, get_terminal_width() - 6)))
+                print(f'  {COLOR_DIM}{ui_symbol("│", "|")}{RESET} ' + fit_console_text(line, max(8, get_terminal_width() - 6)))
             if len(text.splitlines()) > 50 or len(text) >= 12000:
-                print('    [detail dipotong]')
+                print(f'  {COLOR_DIM}[detail dipotong]{RESET}')
         print()
 
 
+ADD_BG = rgb_bg(20, 62, 36) if IS_DARK else rgb_bg(209, 250, 224)
+DEL_BG = rgb_bg(82, 28, 34) if IS_DARK else rgb_bg(254, 215, 215)
+
+
 def render_diff_preview(before, after, filename):
+    """Line-numbered diff with red/green bars, like Claude Code's edit preview."""
     import difflib
-    lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(),
-                                    fromfile=filename + ' (sebelum)', tofile=filename + ' (sesudah)', lineterm=''))
-    print(f'\n  {BOLD}Preview perubahan{RESET}')
-    if not lines:
-        print('    Tidak ada perubahan baris teks.')
-    for line in lines[:60]:
-        color = GREEN if line.startswith('+') else RED if line.startswith('-') else COLOR_DIM
-        print(f'    {color}{fit_console_text(line, max(8, get_terminal_width() - 6))}{RESET}')
-    if len(lines) > 60:
-        print(f'    [preview dipotong; {len(lines) - 60} baris lainnya]')
+    diff = list(difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm='', n=2))
+    added = sum(1 for line in diff if line.startswith('+') and not line.startswith('+++'))
+    removed = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+    connector = ui_symbol('⎿', 'L')
+    new_file = not before
+    head = 'File baru' if new_file else 'Perubahan'
+    print(f'  {COLOR_DIM}{connector}{RESET}  {COLOR_DIM}{head} {ui_symbol("·", "/")} {RESET}{GREEN}+{added}{RESET} {RED}-{removed}{RESET}')
+    if not diff:
+        print(f'     {COLOR_DIM}Tidak ada perubahan baris teks.{RESET}')
+        return
+    width = max(12, get_terminal_width() - 6)
+    old_no = new_no = 0
+    shown = 0
+    for line in diff:
+        if line.startswith(('---', '+++')):
+            continue
+        if line.startswith('@@'):
+            match = re.match(r'@@ -(\d+)(?:,\d+)? \+(\d+)', line)
+            if match:
+                old_no, new_no = int(match.group(1)), int(match.group(2))
+            if shown:
+                print(f'     {COLOR_DIM}{ui_symbol("⋮", ":")}{RESET}')
+            continue
+        if shown >= 60:
+            break
+        sign, text = line[:1], line[1:]
+        if sign == '+':
+            number, bg, fg = new_no, ADD_BG, GREEN
+            new_no += 1
+        elif sign == '-':
+            number, bg, fg = old_no, DEL_BG, RED
+            old_no += 1
+        else:
+            number, bg, fg = new_no, '', COLOR_DIM
+            old_no += 1
+            new_no += 1
+        body = fit_console_text(sign + text, width - 6)
+        pad = ' ' * max(0, width - 6 - str_width(body)) if bg else ''
+        print(f'   {COLOR_DIM}{number:>4}{RESET} {bg}{fg}{body}{pad}{RESET}')
+        shown += 1
+    remaining = sum(1 for line in diff if line[:1] in '+- ' and not line.startswith(('---', '+++'))) - shown
+    if remaining > 0:
+        print(f'     {COLOR_DIM}[preview dipotong; {remaining} baris lainnya]{RESET}')

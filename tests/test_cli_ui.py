@@ -142,7 +142,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn('Halo.', text)
         self.assertIn('print(1)', output.getvalue())
-        self.assertIn('LYRA', output.getvalue())
+        self.assertTrue(styling.strip_ansi(output.getvalue()).lstrip().startswith('● Halo.'))
 
     def test_permissions_still_require_explicit_yes(self):
         import tools

@@ -1,16 +1,30 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  [Logo ASCII LYRA CLI asli]  v2.5.0
+  [Logo ASCII LYRA CLI asli]
 
-  Lyra Orpheus 6 · reasoning medium
-  ~/projects/amagi-cli
+  ╭─ ✦ Lyra CLI v2.6.0 ──────────────────────────────────╮
+  │ Mau ngerjain apa hari ini?                           │
+  │ Lyra Orpheus 6 · reasoning medium                    │
+  │ ~/projects/amagi-cli                                 │
+  ╰──────────────────────────────────────────────────────╯
+  / perintah · @ file · Alt+Enter baris baru · /help
 
-  Mau ngerjain apa hari ini?
-  Jelaskan tugasnya, atau ketik / untuk lihat perintah.
-
-  ›
+  ╭──────────────────────────────────────────────────────╮
+  │ › jelaskan @app.py                                   │
+  ╰──────────────────────────────────────────────────────╯
+  Orpheus 6 · medium  |  ~/projects/amagi-cli / main
 ```
+
+### Baru di v2.6.0 — Tampilan ala agent CLI
+
+- Logo Lyra CLI tetap sama. Di bawahnya ada kartu sambutan berbingkai bulat berisi versi, model, reasoning, dan direktori kerja.
+- Composer berbingkai bulat; footer satu baris menampilkan model, reasoning, direktori, branch Git, dan petunjuk tombol.
+- Jawaban dibuka dengan penanda `●`. Heading, daftar bersarang, kutipan, dan blok kode dirapikan.
+- Aktivitas tool tampil per langkah: `● Baca(app.py)` lalu `⎿ Membaca 120 baris`. Perintah terminal menampilkan status exit dan beberapa baris output; sisanya lewat `/details`.
+- Preview perubahan file memakai nomor baris dan bar merah/hijau, dengan ringkasan `+N -M`.
+- Dialog izin berbingkai bulat dan menampilkan seluruh perintah sebelum disetujui. Jawaban `y`, `ya`, atau `yes` dianggap setuju.
+- Indikator proses memakai simbol `✻` berdenyut dengan jam dan petunjuk `Ctrl+C batal`. `LYRA_ASCII=1`, `NO_COLOR=1`, dan `LYRA_NO_ANIMATION=1` tetap berlaku.
 
 ### Baru di v2.5.0 — Thinking yang ringkas
 
@@ -99,7 +113,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.5.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.6.0.tar.gz
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -173,7 +187,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.5.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.6.0.tar.gz
 ```
 
 #### Method 3: Local Clone Installation

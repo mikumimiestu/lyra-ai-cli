@@ -3,11 +3,12 @@ import os
 import sys
 import threading
 import time
-from styling import COLOR_LYRA, RESET, fit_console_text, get_terminal_width, unicode_terminal
+from styling import (COLOR_DIM, COLOR_LYRA, RESET, fit_console_text, get_gradient_color,
+                     get_terminal_width, rgb_to_ansi, unicode_terminal)
 
 
 class Spinner:
-    FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢']
     ASCII_FRAMES = ['|', '/', '-', '\\']
 
     def __init__(self, message='Memproses permintaan...'):
@@ -26,14 +27,21 @@ class Spinner:
         return max(0, time.monotonic() - self._started) if self._started is not None else 0
 
     def _line(self):
-        frames = self.FRAMES if unicode_terminal() else self.ASCII_FRAMES
+        unicode = unicode_terminal()
+        frames = self.FRAMES if unicode else self.ASCII_FRAMES
         frame = frames[self._i % len(frames)]
         width = max(1, get_terminal_width() - 1)
         seconds = f'{self.elapsed:.0f}s'
-        room = max(1, width - len(seconds) - 6)
-        text = f'  {frame} {fit_console_text(self.message, room)}  {seconds}'
-        text = fit_console_text(text, width)
-        return f'{COLOR_LYRA}{text}{RESET}'
+        prefix = f'  {frame} '
+        full = f' ({seconds} {"·" if unicode else "/"} Ctrl+C batal)'
+        short = f' ({seconds})'
+        suffix = full if width - len(prefix) - len(full) >= 16 else short
+        message = fit_console_text(self.message, max(1, width - len(prefix) - len(suffix)))
+        # The glyph breathes through the Lyra gradient; the clock stays quiet.
+        phase = abs(((self._i % 30) / 15.0) - 1.0)
+        color = rgb_to_ansi(*get_gradient_color(phase)) or COLOR_LYRA
+        return fit_console_text(f'{prefix}{message}{suffix}', width) if not color else \
+            f'{color}{prefix}{message}{RESET}{COLOR_DIM}{suffix}{RESET}'
 
     def _render(self):
         with self._lock:

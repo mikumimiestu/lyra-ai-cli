@@ -107,7 +107,8 @@ class ConsoleTests(unittest.TestCase):
             for i in range(25):
                 log.finish('read_file', {'filepath': str(i)}, 'x' * 20000)
             log.show_details()
-        self.assertIn('! Jalankan', output.getvalue())
+        self.assertIn('● Jalankan(pytest)', output.getvalue())
+        self.assertIn('Gagal · exit 1', output.getvalue())
         self.assertEqual(len(log.entries), 20)
         self.assertTrue(all(len(result) <= 12000 for _, result in log.entries))
         self.assertIn('detail dipotong', output.getvalue())
@@ -171,6 +172,35 @@ class ConsoleTests(unittest.TestCase):
                                           input_stream=pipe, output_stream=DummyOutput())
             pipe.send_text('hello\r')
             self.assertEqual(editor.read(), 'hello')
+
+    def test_welcome_card_is_rounded_and_keeps_context(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=80), \
+             patch.object(styling, 'unicode_terminal', return_value=True):
+            styling.render_header('Lyra Orpheus 6', 'medium', '/work')
+        plain = styling.strip_ansi(output.getvalue())
+        self.assertIn('╭', plain)
+        self.assertIn('╯', plain)
+        self.assertIn('Lyra Orpheus 6', plain)
+        widths = {styling.str_width(line.rstrip()) for line in plain.splitlines() if line.strip().startswith(('╭', '│', '╰'))}
+        self.assertEqual(len(widths), 1)
+
+    def test_permission_box_shows_whole_command(self):
+        output = io.StringIO()
+        command = 'echo one\n' + 'echo ' + 'x' * 200
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=60):
+            styling.render_permission_box('Konfirmasi', {'Perintah': command})
+        plain = styling.strip_ansi(output.getvalue()).replace('\n', '').replace('│', '').replace(' ', '')
+        self.assertIn('x' * 200, plain)
+
+    def test_diff_preview_has_line_numbers_and_summary(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            styling.render_diff_preview('a\nb\nc\n', 'a\nB\nc\n', 'f.py')
+        plain = styling.strip_ansi(output.getvalue())
+        self.assertIn('+1 -1', plain)
+        self.assertRegex(plain, r'2 -b')
+        self.assertRegex(plain, r'2 \+B')
 
     def test_branch_is_shown_only_when_available(self):
         self.assertIn('/ main', styling.toolbar_text('Lyra Orpheus 6', 'medium', '/work', branch='main'))
