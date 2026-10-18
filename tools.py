@@ -688,3 +688,25 @@ def tool_cancel_reminder(reminder_id: str):
     return f"❌ Pengingat ID '{reminder_id}' tidak ditemukan atau sudah tidak aktif."
 
 
+
+
+# ─── Todo List ────────────────────────────────────────────────────────────────
+class TodoList:
+    """Session checklist the model keeps up to date on multi-step tasks."""
+
+    def __init__(self):
+        self.items = []
+
+    def update(self, raw):
+        from styling import normalize_todos
+        try:
+            self.items = normalize_todos(raw)
+        except ValueError as error:
+            return f"Error: {error}"
+        done = sum(1 for item in self.items if item['status'] == 'completed')
+        active = [item['content'] for item in self.items if item['status'] == 'in_progress']
+        message = f"Daftar tugas diperbarui: {done}/{len(self.items)} selesai."
+        return message + (f" Sedang dikerjakan: {active[0]}" if active else "")
+
+    def clear(self):
+        self.items = []

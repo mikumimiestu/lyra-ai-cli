@@ -12,6 +12,8 @@ export const models = [
   { name: 'Lyra Eurydice 6', id: 'lyra-eurydice-6', reasoning: true, default: false },
 ];
 export const commands = [
+  { name: '/status', group: 'Sesi & model', description: 'Ringkasan sesi: versi, model, direktori, perkiraan konteks, tugas, dan daemon. API key tidak ditampilkan.', example: '/status' },
+  { name: '/todos', group: 'Sesi & model', description: 'Lihat daftar tugas yang sedang dikerjakan Lyra pada pekerjaan multi-langkah.', example: '/todos' },
   { name: '/details', group: 'Sesi & model', description: 'Lihat lima aktivitas tool terakhir dari riwayat maksimal 20 aktivitas di memori.', example: '/details' },
   { name: '/model', group: 'Sesi & model', description: 'Buka pilihan model Lyra. Pilihan disimpan untuk sesi berikutnya.', example: '/model' },
   { name: '/reasoning', group: 'Sesi & model', description: 'Pilih tingkat penalaran low atau medium.', example: '/reasoning' },
@@ -35,11 +37,17 @@ export const shortcuts = [
   { keys: 'Enter', action: 'Kirim pesan' },
   { keys: 'Alt+Enter / Ctrl+J', action: 'Tambah baris' },
   { keys: 'Tab / ↑ ↓', action: 'Pilih saran perintah atau file' },
+  { keys: 'Esc', action: 'Hentikan jawaban yang sedang mengalir' },
   { keys: 'Ctrl+C', action: 'Batalkan draft atau proses aktif' },
   { keys: 'Ctrl+D', action: 'Keluar saat input kosong' },
 ];
 
 export const releases = [
+  { version: '2.7.0', title: 'Streaming halus, Esc, dan daftar tugas.', changes: [
+    'Jawaban mengalir per token dengan gaya tebal, miring, dan kode. Tekan Esc untuk membatalkan saat Lyra menjawab.',
+    'Daftar tugas untuk pekerjaan multi-langkah, dapat dilihat lewat /todos.',
+    '/status merangkum sesi. Footer menampilkan perkiraan konteks terpakai dan menguning saat hampir penuh.',
+  ], commit: 'main' },
   { version: '2.6.0', title: 'Tampilan ala agent CLI.', changes: [
     'Logo Lyra tetap sama. Kartu sambutan berbingkai bulat menampilkan versi, model, reasoning, dan direktori kerja.',
     'Composer berbingkai bulat dengan footer satu baris: model, reasoning, direktori, branch Git, dan petunjuk tombol.',

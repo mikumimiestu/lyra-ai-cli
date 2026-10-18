@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.6.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.7.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -15,6 +15,14 @@
   ╰──────────────────────────────────────────────────────╯
   Orpheus 6 · medium  |  ~/projects/amagi-cli / main
 ```
+
+### Baru di v2.7.0 — Streaming halus, Esc, dan daftar tugas
+
+- **Streaming per token:** teks jawaban muncul seketika saat diterima, lengkap dengan gaya `**tebal**`, `*miring*`, dan `kode`. Heading, blok kode, garis, dan tabel tetap dirender rapi per baris.
+- **Esc untuk berhenti:** tekan Esc saat Lyra menjawab untuk membatalkan, sama seperti Ctrl+C. Terminal hanya dialihkan selama jawaban mengalir, jadi prompt izin dan editor tidak terpengaruh. `LYRA_NO_ESC=1` mematikan fitur ini.
+- **Daftar tugas:** untuk pekerjaan multi-langkah Lyra menampilkan checklist (`☐` menunggu, `◼` dikerjakan, `☒` selesai) dan memperbaruinya per langkah. Lihat kapan saja dengan `/todos`.
+- **`/status`:** ringkasan versi, model, reasoning, direktori, branch, sumber API key (tanpa menampilkan key), ukuran percakapan, tugas, memori, daemon, dan terminal.
+- **Footer konteks:** `ctx ~12%` memperkirakan ukuran percakapan (sekitar 4 karakter per token) terhadap jendela konteks 128.000 token. Ubah dengan `LYRA_CONTEXT_TOKENS`. Footer menguning di 80% dan memerah di 95%, dan Lyra memberi peringatan sekali di 90%. `/clear` mengosongkan konteks.
 
 ### Baru di v2.6.0 — Tampilan ala agent CLI
 
@@ -133,6 +141,8 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 
 | Perintah | Deskripsi |
 | :--- | :--- |
+| `/status` | Ringkasan sesi: versi, model, direktori, konteks, daemon |
+| `/todos` | Lihat daftar tugas yang sedang dikerjakan Lyra |
 | `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5) |
 | `/reasoning` | Atur tingkat penalaran (`cepat` / `sedang`) |
 | `/memory` | Kelola memori jangka panjang (`~/.amagi_memory.md`) |

@@ -21,13 +21,15 @@ from styling import (
     render_header, render_footer_bar, render_markdown_table,
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
-from spinner import Spinner
-from styling import TerminalInput, COMMANDS, ActivityLog, prepare_user_message, ui_symbol, fit_console_text
+from spinner import Spinner, EscapeWatcher
+from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
+                     fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
+                     USE_COLOR, workspace_branch)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
     get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
-    tool_set_reminder, tool_list_reminders, tool_cancel_reminder
+    tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
@@ -107,12 +109,14 @@ Daftar tool yang tersedia:
 - set_reminder     : Setel pengingat baru & notifikasi popup desktop laptop. Amagi akan bangun sendiri menyalakan notifikasi! Args: {{"message": "pesan", "time_input": "10m" / "14:30" / "YYYY-MM-DD HH:MM"}}
 - list_reminders   : Daftar pengingat tersimpan. Args: {{"status": "pending"}}
 - cancel_reminder  : Batalkan pengingat. Args: {{"reminder_id": "rem_..."}}
+- update_todos     : Tampilkan/perbarui daftar tugas untuk pekerjaan multi-langkah. Kirim SELURUH daftar setiap kali. Args: {{"todos": [{{"content": "langkah", "status": "pending|in_progress|completed"}}]}}
 
 Panduan fitur khusus:
 1. Memori: Jika pengguna meminta "ingat ini...", "simpan ke memori...", atau memberikan fakta penting pengguna, gunakan tool `save_memory`.
 2. Tanggal & Waktu: Selalu gunakan informasi waktu laptop terkini di atas saat menjawab pertanyaan terkait waktu.
 3. Pengingat & Notifikasi: Jika pengguna minta ingatkan sesuatu ("ingatkan saya 10 menit lagi untuk...", "set alarm jam 8 pagi"), gunakan tool `set_reminder`.
-4. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
+4. Daftar tugas: Untuk pekerjaan dengan 3 langkah atau lebih, mulai dengan `update_todos`, jaga tepat satu item berstatus in_progress, dan perbarui daftar setiap satu langkah selesai. Jangan pakai untuk permintaan sederhana.
+5. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
 """
 
 def get_current_system_prompt():
@@ -397,98 +401,73 @@ def stream_ai_response(headers, data, model_info=None):
     response = None
     chunks = []
     parser = VisibleResponseFilter()
-    main_buffer = ''
-    table_buffer = []
-    markdown_state = {'in_code': False, 'lang': ''}
     visible_started = False
-    bullet_done = False
 
-    def with_bullet(formatted):
-        """The answer opens with a Lyra bullet in the left margin, like other agent CLIs."""
-        nonlocal bullet_done
-        if bullet_done or not formatted.strip():
-            return formatted
-        bullet_done = True
-        lines = formatted.split('\n')
-        for i, text in enumerate(lines):
-            if text.strip():
-                lines[i] = f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {text[2:] if text.startswith('  ') else text}"
-                break
-        return '\n'.join(lines)
-
-    def flush_table():
-        if table_buffer:
-            for line in render_markdown_table(table_buffer):
-                print(line)
-            table_buffer.clear()
-
-    def render_line(line):
-        nonlocal markdown_state
-        if line.strip().startswith('|'):
-            table_buffer.append(line)
-        else:
-            flush_table()
-            formatted, markdown_state = format_markdown_line(line, markdown_state)
-            print(with_bullet(formatted))
-        sys.stdout.flush()
-
-    def display(text):
-        nonlocal main_buffer, visible_started
-        main_buffer += text
-        if not visible_started and not main_buffer.strip():
+    def emit(text):
+        """Write answer text as it arrives; the spinner leaves the screen before the first character."""
+        nonlocal visible_started
+        if not text:
             return
         if not visible_started:
+            if not text.strip():
+                return
             spinner.stop()
             visible_started = True
-            print()
-        while '\n' in main_buffer:
-            line, main_buffer = main_buffer.split('\n', 1)
-            render_line(line)
+            sys.stdout.write('\n')
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+    # Lambdas resolve the formatters at call time so they stay patchable.
+    renderer = StreamRenderer(emit, lambda line, state: format_markdown_line(line, state),
+                              lambda lines: render_markdown_table(lines))
 
     try:
         spinner.start()
-        response = requests.post(API_URL, headers=headers, json={**data, 'stream': True},
-                                 stream=True, timeout=DEFAULT_TIMEOUT)
-        if response.status_code != 200:
-            return response.status_code, response.text
-        for raw_line in response.iter_lines():
-            if not raw_line:
-                continue
-            line = raw_line.decode('utf-8')
-            if not line.startswith('data: '):
-                continue
-            payload = line[6:].strip()
-            if payload == '[DONE]':
-                break
-            try:
-                delta = json.loads(payload)['choices'][0]['delta']
-                content = delta.get('content') or ''
-                reasoning = delta.get('reasoning_content') or delta.get('reasoning')
-            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-                continue
-            if reasoning and not visible_started:
-                spinner.set_message('Memproses permintaan...')
-            if not isinstance(content, str) or not content:
-                continue
-            visible = parser.feed(content)
-            chunks.append(visible)
-            if parser.saw_reasoning and not visible_started:
-                spinner.set_message('Memproses permintaan...')
-            if parser.tool_call and not visible_started:
-                spinner.set_message('Menyiapkan aksi...')
-            display(visible)
-        display(parser.feed('', final=True))
-        if main_buffer.strip():
-            render_line(main_buffer)
-        flush_table()
+        with EscapeWatcher():
+            response = requests.post(API_URL, headers=headers, json={**data, 'stream': True},
+                                     stream=True, timeout=DEFAULT_TIMEOUT)
+            if response.status_code != 200:
+                return response.status_code, response.text
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                line = raw_line.decode('utf-8')
+                if not line.startswith('data: '):
+                    continue
+                payload = line[6:].strip()
+                if payload == '[DONE]':
+                    break
+                try:
+                    delta = json.loads(payload)['choices'][0]['delta']
+                    content = delta.get('content') or ''
+                    reasoning = delta.get('reasoning_content') or delta.get('reasoning')
+                except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+                    continue
+                if reasoning and not visible_started:
+                    spinner.set_message('Memproses permintaan...')
+                if not isinstance(content, str) or not content:
+                    continue
+                visible = parser.feed(content)
+                chunks.append(visible)
+                if parser.saw_reasoning and not visible_started:
+                    spinner.set_message('Memproses permintaan...')
+                if parser.tool_call and not visible_started:
+                    spinner.set_message('Menyiapkan aksi...')
+                renderer.feed(visible)
+            renderer.feed(parser.feed('', final=True))
+        renderer.finish()
         if not visible_started and not parser.tool_call:
             return 0, 'Layanan selesai tanpa jawaban. Coba kirim ulang permintaan.'
         return 200, ''.join(chunks) + ''.join(parser.tool_chunks)
     except Exception as error:
         # Clear progress before any error text or pending answer is printed.
         spinner.stop()
-        flush_table()
+        renderer.abort()
         return 0, f'Error streaming: {error}'
+    except BaseException:
+        spinner.stop()
+        renderer.abort()
+        raise
     finally:
         spinner.stop()
         if response is not None:
@@ -497,7 +476,66 @@ def stream_ai_response(headers, data, model_info=None):
             except Exception:
                 pass
 
+# ─── Context estimate ─────────────────────────────────────────────────────────
+DEFAULT_CONTEXT_TOKENS = 128000   # assumed window; override with LYRA_CONTEXT_TOKENS
+
+def context_limit():
+    try:
+        value = int(os.environ.get("LYRA_CONTEXT_TOKENS", ""))
+        return value if value > 0 else DEFAULT_CONTEXT_TOKENS
+    except ValueError:
+        return DEFAULT_CONTEXT_TOKENS
+
+def estimate_context_tokens(messages):
+    """Rough size of the conversation: about four characters per token."""
+    return sum(len(str(m.get("content", ""))) for m in messages) // 4
+
+def context_percent(messages):
+    return min(999, round(estimate_context_tokens(messages) * 100 / context_limit()))
+
 # ─── Slash Command Handlers ───────────────────────────────────────────────────
+def handle_status_command(config, model_idx, cwd, messages, todo_list):
+    """Session summary in a rounded card; never prints the API key."""
+    model = MODELS[model_idx]
+    effort = config.get("reasoning_effort", "medium") if model["supports_reasoning"] else "tanpa reasoning"
+    key_source = "dari ASTBYTE_API_KEY" if os.getenv("ASTBYTE_API_KEY", "").strip() else (
+        "tersimpan di config" if config.get("api_key") else "belum diatur")
+    turns = len([m for m in messages if m["role"] != "system"])
+    tokens = estimate_context_tokens(messages)
+    done = sum(1 for item in todo_list.items if item["status"] == "completed")
+    rows = [
+        ("Versi", f"v{VERSION}"),
+        ("Model", f"{model['name']} ({model['id']})"),
+        ("Reasoning", effort),
+        ("Direktori", short_path(cwd)),
+        ("Branch", workspace_branch(cwd) or "-"),
+        ("API key", key_source),
+        ("Endpoint", API_URL.split("/")[2]),
+        ("Percakapan", f"{turns} pesan, ~{tokens:,} token ({context_percent(messages)}% dari {context_limit():,})"),
+        ("Tugas", f"{done}/{len(todo_list.items)} selesai" if todo_list.items else "-"),
+        ("Memori", f"{len(read_memory().strip())} karakter"),
+        ("Pengingat", "daemon aktif" if is_daemon_running() else "daemon mati"),
+        ("Terminal", f"{get_terminal_width()} kolom, {'unicode' if unicode_terminal() else 'ASCII'}, {'warna' if USE_COLOR else 'tanpa warna'}"),
+    ]
+    width = box_width(78)
+    room = width - 4
+    key_w = max(len(label) for label, _ in rows) + 2
+    body = [f"{COLOR_DIM}{label:<{key_w}}{RESET}{fit_console_text(value, max(8, room - key_w))}" for label, value in rows]
+    print()
+    for line in render_box(body, width, title=f"{BOLD}{COLOR_LYRA}{ui_symbol('✦', '*')} Status{RESET}"):
+        print("  " + line)
+    print()
+
+def handle_todos_command(todo_list):
+    print()
+    if not todo_list.items:
+        print(f"  {COLOR_DIM}Belum ada daftar tugas. Lyra membuatnya sendiri untuk pekerjaan multi-langkah.{RESET}\n")
+        return
+    print(f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {BOLD}Daftar tugas{RESET}")
+    for line in render_todo_lines(todo_list.items, indent="  "):
+        print(line)
+    print()
+
 def handle_project_command(cwd):
     """Wizard pembuatan project baru."""
     print(f"\n  {BOLD}{COLOR_LYRA}✦ Buat Project Baru{RESET}\n")
@@ -543,6 +581,8 @@ def main():
     # Inisialisasi system prompt dengan waktu dan memori terbaru
     messages = [{"role": "system", "content": get_current_system_prompt()}]
     active_cwd = os.getcwd()
+    todo_list = TodoList()
+    context_warned = False
 
     # Pastikan daemon pengingat latar belakang berjalan
     ensure_daemon_running()
@@ -566,6 +606,7 @@ def main():
         "effort": config.get("reasoning_effort", "medium"),
         "directory": active_cwd,
         "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
+        "context_pct": context_percent(messages),
     })
 
     activity = ActivityLog()
@@ -599,6 +640,14 @@ def main():
 
             elif user_input.lower() in ("/", "/help"):
                 render_help()
+                continue
+
+            elif user_input.lower() == "/status":
+                handle_status_command(config, model_idx, active_cwd, messages, todo_list)
+                continue
+
+            elif user_input.lower() in ("/todos", "/todo"):
+                handle_todos_command(todo_list)
                 continue
 
             elif user_input.lower() == '/details':
@@ -641,6 +690,8 @@ def main():
 
             elif user_input.lower() == "/clear":
                 messages = [{"role": "system", "content": get_current_system_prompt()}]
+                todo_list.clear()
+                context_warned = False
                 print(f"  {GREEN}✓ Riwayat percakapan dibersihkan.{RESET}\n")
                 continue
 
@@ -697,6 +748,9 @@ def main():
             # Selalu perbarui system prompt dengan waktu & memori paling aktual
             messages[0] = {"role": "system", "content": get_current_system_prompt()}
             messages.append({"role": "user", "content": message_content})
+            if not context_warned and context_percent(messages) >= 90:
+                context_warned = True
+                print(f"\n  {YELLOW}{ui_symbol('⚠', '!')} Konteks hampir penuh (~{context_percent(messages)}%). Pertimbangkan /clear agar jawaban tetap akurat.{RESET}")
             print()
 
             while True:
@@ -787,6 +841,8 @@ def main():
                         result = tool_list_reminders(status=args.get("status"))
                     elif func_name == "cancel_reminder":
                         result = tool_cancel_reminder(args.get("reminder_id", ""))
+                    elif func_name == "update_todos":
+                        result = todo_list.update(args.get("todos"))
                     else:
                         result = f"Error: Tool '{func_name}' tidak dikenal."
 

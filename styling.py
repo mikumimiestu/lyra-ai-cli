@@ -560,6 +560,8 @@ def format_thinking_line_bubble(line, width=None):
 
 # ─── Interactive command editor ──────────────────────────────────────────────
 COMMANDS = [
+    ('/status', 'Lihat ringkasan sesi dan konfigurasi'),
+    ('/todos', 'Lihat daftar tugas yang sedang berjalan'),
     ('/details', 'Buka detail aktivitas terakhir'),
     ('/model', 'Pilih model Lyra'),
     ('/reasoning', 'Atur penalaran low / medium'),
@@ -588,12 +590,13 @@ def short_path(directory):
     return directory
 
 
-def toolbar_text(model, effort, directory, supports_reasoning=True, branch=None):
+def toolbar_text(model, effort, directory, supports_reasoning=True, branch=None, context_pct=None):
     model = model.removeprefix('Lyra ') if hasattr(str, 'removeprefix') else model.replace('Lyra ', '', 1)
     reasoning = effort if supports_reasoning else 'tanpa reasoning'
     separator = ui_symbol('·', '/')
     location = short_path(directory) + (' / ' + branch if branch else '')
-    return '{} {} {}  |  {}'.format(model, separator, reasoning, location)
+    context = ' {} ctx ~{}%'.format(separator, context_pct) if context_pct is not None else ''
+    return '{} {} {}{}  |  {}'.format(model, separator, reasoning, context, location)
 
 
 try:
@@ -736,7 +739,9 @@ class TerminalInput:
         left = fit_console_text(text, width)
         gap = width - str_width(left) - str_width(hints)
         line = left + ' ' * gap + hints if gap >= 3 else left
-        return ANSI('  {}{}{}'.format(COLOR_DIM, line, RESET))
+        pct = context.get('context_pct')
+        color = RED if pct is not None and pct >= 95 else YELLOW if pct is not None and pct >= 80 else COLOR_DIM
+        return ANSI('  {}{}{}'.format(color, line, RESET))
 
     def read(self):
         marker = ui_symbol('›', '>')
@@ -773,6 +778,7 @@ def tool_call_parts(name, arguments):
         'set_reminder': ('Buat pengingat', None),
         'list_reminders': ('Lihat pengingat', None),
         'cancel_reminder': ('Batalkan pengingat', None),
+        'update_todos': ('Daftar tugas', None),
     }
     label, key = labels.get(name, ('Tool ' + name, None))
     value = str(arguments.get(key, '')) if key else ''
@@ -928,6 +934,48 @@ def _output_preview(text, limit=4):
     return body[:limit], max(0, len(body) - limit)
 
 
+TODO_STATUSES = ('pending', 'in_progress', 'completed')
+
+
+def normalize_todos(raw):
+    """Validate a model-supplied todo list. Raises ValueError with a user-facing message."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError('todos harus berupa daftar yang tidak kosong.')
+    if len(raw) > 20:
+        raise ValueError('Maksimal 20 item tugas.')
+    items = []
+    for entry in raw:
+        if isinstance(entry, str):
+            entry = {'content': entry}
+        if not isinstance(entry, dict):
+            raise ValueError('Setiap tugas harus berupa teks atau objek dengan "content".')
+        content = entry.get('content', entry.get('task', entry.get('title', '')))
+        content = ''.join(char if char.isprintable() else ' ' for char in str(content)).strip()
+        status = str(entry.get('status', 'pending')).strip().lower().replace('-', '_').replace(' ', '_')
+        if not content:
+            raise ValueError('Isi tugas tidak boleh kosong.')
+        if status not in TODO_STATUSES:
+            raise ValueError('Status harus salah satu dari: ' + ', '.join(TODO_STATUSES) + '.')
+        items.append({'content': content[:160], 'status': status})
+    return items
+
+
+def render_todo_lines(items, indent='     '):
+    """Checklist lines: done items struck through, the active one bold."""
+    width = max(8, get_terminal_width() - len(indent) - 6)
+    lines = []
+    for item in items:
+        text = fit_console_text(item['content'], width)
+        if item['status'] == 'completed':
+            lines.append(f"{indent}{COLOR_DIM}{ui_symbol('☒', '[x]')} \033[9m{text}{RESET}" if USE_COLOR
+                         else f"{indent}{ui_symbol('☒', '[x]')} {text}")
+        elif item['status'] == 'in_progress':
+            lines.append(f"{indent}{BOLD}{COLOR_LYRA}{ui_symbol('◼', '[>]')}{RESET} {BOLD}{text}{RESET}")
+        else:
+            lines.append(f"{indent}{COLOR_DIM}{ui_symbol('☐', '[ ]')}{RESET} {text}")
+    return lines
+
+
 class ActivityLog:
     def __init__(self):
         self.entries = []
@@ -970,6 +1018,12 @@ class ActivityLog:
                 print(f'     {COLOR_DIM}{fit_console_text(line, max(8, get_terminal_width() - 8))}{RESET}')
             if more:
                 print(f'     {COLOR_DIM}… +{more} baris (/details){RESET}')
+        if name == 'update_todos' and not failed:
+            try:
+                for line in render_todo_lines(normalize_todos(arguments.get('todos'))):
+                    print(line)
+            except ValueError:
+                pass
         label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
         self.entries.append((label, text[:12000]))
         self.entries = self.entries[-20:]
@@ -1049,3 +1103,209 @@ def render_diff_preview(before, after, filename):
     remaining = sum(1 for line in diff if line[:1] in '+- ' and not line.startswith(('---', '+++'))) - shown
     if remaining > 0:
         print(f'     {COLOR_DIM}[preview dipotong; {remaining} baris lainnya]{RESET}')
+
+
+class StreamRenderer:
+    """Incremental markdown renderer for streamed answers.
+
+    Paragraph, list and quote text is written as it arrives, token by token, with `**bold**`,
+    `*italic*` and `code` styled on the fly. Headings, rules, code blocks and tables need the whole
+    line to format correctly, so those are written once their line is complete.
+    """
+    _MARKER_CHARS = frozenset('#`-*+_>|0123456789. \t')
+
+    def __init__(self, write, format_line=None, render_table=None):
+        self.write = write
+        self.format_line = format_line or format_markdown_line
+        self.render_table = render_table or render_markdown_table
+        self.state = {'in_code': False, 'lang': ''}
+        self.line = ''
+        self.mode = None            # None (undecided) | 'block' | 'inline'
+        self.table = []
+        self.started = False
+        self.lead_done = False
+        self.bold = self.italic = self.code = self.star = False
+        self.skip_ws = False
+        self.base = ''
+
+    # -- public ---------------------------------------------------------
+    def feed(self, text):
+        out = []
+        for char in text:
+            self._char(char, out)
+        if out:
+            self.write(''.join(out))
+
+    def finish(self):
+        out = []
+        if self.line.strip() or self.mode == 'inline':
+            self._newline(out)
+        self._flush_table(out)
+        if out:
+            self.write(''.join(out))
+
+    def abort(self):
+        """Interrupted mid-line: only make sure no style leaks into the next prompt."""
+        if self.mode == 'inline':
+            self.write(RESET)
+
+    # -- line machinery -------------------------------------------------
+    def _char(self, char, out):
+        if char == '\r':
+            return
+        if char == '\n':
+            self._newline(out)
+        elif self.mode is None:
+            self.line += char
+            self._decide(out, final=False)
+        elif self.mode == 'block':
+            self.line += char
+        else:
+            self._inline(char, out)
+
+    def _classify(self, text, final):
+        if self.state['in_code']:
+            return 'block'
+        if (re.match(r'^\s*\|', text) or re.match(r'^\s*```', text) or re.match(r'^#{1,3} ', text)
+                or re.match(r'^\s*([-*_])\1\1', text)):
+            return 'block'
+        if not final and len(text) < 4 and all(char in self._MARKER_CHARS for char in text):
+            return None
+        return 'inline'
+
+    def _decide(self, out, final):
+        if not self.line.strip():
+            return
+        kind = self._classify(self.line, final)
+        if kind == 'block':
+            self.mode = 'block'
+        elif kind == 'inline':
+            self._begin_inline(out)
+
+    def _newline(self, out):
+        if self.mode is None:
+            if not self.line.strip() and not self.state['in_code']:
+                if self.started:
+                    out.append('\n')
+                self.line = ''
+                return
+            if self.mode is None and self.line.strip():
+                self._decide(out, final=True)
+            elif self.state['in_code']:
+                self.mode = 'block'
+        if self.mode == 'block':
+            self._finish_block(out)
+        elif self.mode == 'inline':
+            if self.star:
+                out.append('*')
+            out.append(RESET + '\n')
+        self.line = ''
+        self.mode = None
+        self.bold = self.italic = self.code = self.star = False
+
+    # -- block lines ----------------------------------------------------
+    def _lead(self):
+        if self.lead_done:
+            return '  '
+        self.lead_done = True
+        return f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} "
+
+    def _with_lead(self, formatted):
+        if self.lead_done or not formatted.strip():
+            return formatted
+        self.lead_done = True
+        lines = formatted.split('\n')
+        for i, text in enumerate(lines):
+            if text.strip():
+                lines[i] = f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {text[2:] if text.startswith('  ') else text}"
+                break
+        return '\n'.join(lines)
+
+    def _flush_table(self, out):
+        if self.table:
+            for row in self.render_table(self.table):
+                out.append(row + '\n')
+            self.table = []
+
+    def _finish_block(self, out):
+        if self.line.strip().startswith('|') and not self.state['in_code']:
+            self.table.append(self.line)
+            return
+        self._flush_table(out)
+        formatted, self.state = self.format_line(self.line, self.state)
+        out.append(self._with_lead(formatted) + '\n')
+        self.started = True
+
+    # -- streamed lines -------------------------------------------------
+    def _begin_inline(self, out):
+        self._flush_table(out)
+        text = self.line
+        lead = self._lead()
+        self.started = True
+        self.mode = 'inline'
+        self.base = WHITE
+        rest = text
+        bullet = re.match(r'^(\s*)[-*+]\s', text)
+        numbered = re.match(r'^(\s*)(\d+)\.\s', text)
+        if bullet or numbered:
+            match = bullet or numbered
+            indent = ' ' * (len(match.group(1).replace('\t', '  ')) // 2 * 2)
+            marker = ui_symbol('•', '-') if bullet else numbered.group(2) + '.'
+            out.append(f"{lead}{indent}{COLOR_LYRA}{marker}{RESET} {self.base}")
+            rest = text[match.end():]
+            self.skip_ws = True
+        elif text.startswith('> '):
+            self.base = COLOR_DIM + ITALIC
+            out.append(f"{lead}{COLOR_DIM}{ui_symbol('▎', '|')} {self.base}")
+            rest = text[2:]
+            self.skip_ws = True
+        else:
+            out.append(f"{lead}{self.base}")
+        for char in rest:
+            self._inline(char, out)
+
+    def _style(self):
+        style = self.base
+        if self.bold:
+            style += BOLD
+        if self.italic:
+            style += ITALIC
+        if self.code:
+            style += INLINE_CODE_BG + COLOR_ACCENT
+        return style
+
+    def _restyle(self, out):
+        out.append(RESET + self._style())
+
+    def _inline(self, char, out):
+        if self.skip_ws:
+            if char in ' \t':
+                return
+            self.skip_ws = False
+        if self.star:
+            self.star = False
+            if char == '*':
+                self.bold = not self.bold
+                self._restyle(out)
+                return
+            if self.italic:
+                self.italic = False
+                self._restyle(out)
+            elif char not in ' \t':
+                self.italic = True
+                self._restyle(out)
+            else:
+                out.append('*')
+        if char == '*' and not self.code:
+            self.star = True
+            return
+        if char == '`':
+            self.code = not self.code
+            if self.code:
+                self._restyle(out)
+                out.append(' ')
+            else:
+                out.append(' ')
+                self._restyle(out)
+            return
+        out.append(char)

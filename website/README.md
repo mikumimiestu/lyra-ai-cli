@@ -24,7 +24,7 @@ Tiga file instalasi tersedia saat development, preview, dan di hasil build:
 
 - `/install`: script asli `../install.sh`.
 - `/install.ps1`: script asli `../install.ps1`.
-- `/packages/amagi_cli-2.6.0.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
+- `/packages/amagi_cli-2.7.0.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
 
 Perintah instalasi:
 

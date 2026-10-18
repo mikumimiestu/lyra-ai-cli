@@ -84,7 +84,7 @@ export function TerminalPreview() {
         <div className="console-composer console-sent"><span>›</span><span>{session.command}</span></div>
         <div className="console-output" key={`${active}-${phase}`}>
           {phase !== 'done' ? <>
-            <div className="console-thinking"><span className={playing && !reducedMotion ? 'thinking-glyph spinning' : 'thinking-glyph'} aria-hidden="true">✻</span><span>{phase === 'waiting' ? 'Menunggu respons...' : 'Memproses permintaan...'}</span><time>({elapsed}s · Ctrl+C batal)</time></div>
+            <div className="console-thinking"><span className={playing && !reducedMotion ? 'thinking-glyph spinning' : 'thinking-glyph'} aria-hidden="true">✻</span><span>{phase === 'waiting' ? 'Menunggu respons...' : 'Memproses permintaan...'}</span><time>({elapsed}s · Esc batal)</time></div>
             <p className="console-hint">{playing ? 'Simulasi sedang diputar' : 'Langkah contoh · lanjutkan untuk melihat hasil'}</p>
           </> : active === 2 ? <>
             <p className="console-tool"><i>●</i> <b>Baca</b><span>(app.py)</span></p><p className="console-result">⎿ Membaca 42 baris</p>
