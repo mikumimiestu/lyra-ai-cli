@@ -9,7 +9,6 @@ if _current_dir not in sys.path:
 import requests
 import json
 import re
-import time
 import threading
 
 # ─── Import custom modules ────────────────────────────────────────────────────
@@ -23,7 +22,7 @@ from styling import (
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
 from spinner import Spinner
-from styling import TerminalInput, COMMANDS, ActivityLog, prepare_user_message, ui_symbol
+from styling import TerminalInput, COMMANDS, ActivityLog, prepare_user_message, ui_symbol, fit_console_text
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -230,8 +229,10 @@ def handle_update_command(interactive=True):
     print(f"\n  {BOLD}{COLOR_LYRA}✦ Cek Pembaruan Lyra CLI{RESET}")
     spinner = Spinner("Memeriksa versi terbaru di GitHub...")
     spinner.start()
-    has_update, latest_version = check_remote_version(timeout=6.0)
-    spinner.stop()
+    try:
+        has_update, latest_version = check_remote_version(timeout=6.0)
+    finally:
+        spinner.stop()
 
     if not has_update:
         print(f"  {GREEN}✓ Lyra CLI Anda sudah menggunakan versi terbaru (v{VERSION}).{RESET}\n")
@@ -250,8 +251,10 @@ def handle_update_command(interactive=True):
 
     spin_up = Spinner("Mengunduh & menginstal file terbaru dari GitHub...")
     spin_up.start()
-    success, msg = perform_update()
-    spin_up.stop()
+    try:
+        success, msg = perform_update()
+    finally:
+        spin_up.stop()
 
     if success:
         print(f"  {GREEN}✓ {msg}{RESET}")
@@ -334,173 +337,157 @@ def render_help():
 
 
 # ─── Stream Response Handler ─────────────────────────────────────────────────
+class VisibleResponseFilter:
+    """Hide reasoning and tool XML, including tags split across SSE chunks."""
+    def __init__(self):
+        self.pending = ''
+        self.thinking = False
+        self.tool_call = False
+        self.saw_reasoning = False
+        self.tool_chunks = []
+
+    @staticmethod
+    def _tail_length(text, tags):
+        return max((size for tag in tags for size in range(1, len(tag))
+                    if text.endswith(tag[:size])), default=0)
+
+    def feed(self, text, final=False):
+        if self.tool_call:
+            self.tool_chunks.append(text)
+            return ''
+        self.pending += text
+        visible = []
+        while self.pending:
+            if self.thinking:
+                end = self.pending.find('</think>')
+                if end < 0:
+                    keep = self._tail_length(self.pending, ['</think>'])
+                    self.pending = self.pending[-keep:] if keep else ''
+                    break
+                self.pending = self.pending[end + len('</think>'):]
+                self.thinking = False
+                continue
+            tags = ['<think>', '<tool_call>']
+            found = [(self.pending.find(tag), tag) for tag in tags if tag in self.pending]
+            if found:
+                position, tag = min(found)
+                visible.append(self.pending[:position])
+                self.pending = self.pending[position + len(tag):]
+                if tag == '<think>':
+                    self.thinking = True
+                    self.saw_reasoning = True
+                else:
+                    self.tool_call = True
+                    self.tool_chunks.append(tag + self.pending)
+                    self.pending = ''
+                    break
+            else:
+                keep = self._tail_length(self.pending, tags)
+                visible.append(self.pending[:-keep] if keep else self.pending)
+                self.pending = self.pending[-keep:] if keep else ''
+                break
+        # An unfinished protocol tag must not leak into the transcript.
+        if final:
+            self.pending = ''
+        return ''.join(visible)
+
+
 def stream_ai_response(headers, data, model_info=None):
-    """
-    Stream respons AI secara langsung tanpa kotak border, dengan format Markdown dan Tabel Grid ala Claude CLI.
-    """
-    model_name = model_info.get("name", "Lyra") if model_info else "Lyra"
-    reasoning_effort = data.get("reasoning_effort", "medium")
-    reasoning_label = "cepat" if reasoning_effort == "low" else "sedang"
-    
-    spinner_msg = "Menunggu Lyra…"
-    spinner = Spinner(spinner_msg)
-    spinner.start()
-    
-    start_time = time.time()
-
-    try:
-        response = requests.post(
-            API_URL,
-            headers=headers,
-            json={**data, "stream": True},
-            stream=True,
-            timeout=DEFAULT_TIMEOUT,
-        )
-    except Exception as e:
-        spinner.stop()
-        return 0, f"Error koneksi: {e}"
-
-    spinner.stop()
-
-    if response.status_code != 200:
-        return response.status_code, response.text
-
-    print(f"\n  {COLOR_LYRA}{ui_symbol(chr(0x2726), chr(42))}{RESET} {BOLD}LYRA{RESET}")
-    thinking_printed = False
-    in_thinking_mode = False
-
-    full_content = ""
-    thinking_buffer = ""
-    main_buffer = ""
+    model = model_info or {}
+    effort = data.get('reasoning_effort', 'medium')
+    label = f'reasoning {effort}' if model.get('supports_reasoning', True) else 'tanpa reasoning'
+    context = f"{model.get('name', 'Lyra')} {ui_symbol('·', '/')} {label}"
+    print(f"\n  {COLOR_LYRA}{ui_symbol('✦', '*')}{RESET} {BOLD}LYRA{RESET}")
+    print(f"    {COLOR_DIM}{fit_console_text(context, max(1, get_terminal_width() - 5))}{RESET}")
+    spinner = Spinner('Menunggu respons...')
+    response = None
+    chunks = []
+    parser = VisibleResponseFilter()
+    main_buffer = ''
     table_buffer = []
     markdown_state = {'in_code': False, 'lang': ''}
-    tool_call_detected = False
+    visible_started = False
 
-    def flush_table_buffer():
-        nonlocal table_buffer
+    def flush_table():
         if table_buffer:
-            tbl_lines = render_markdown_table(table_buffer)
-            for t_line in tbl_lines:
-                print(t_line)
-            sys.stdout.flush()
-            table_buffer = []
+            for line in render_markdown_table(table_buffer):
+                print(line)
+            table_buffer.clear()
+
+    def render_line(line):
+        nonlocal markdown_state
+        if line.strip().startswith('|'):
+            table_buffer.append(line)
+        else:
+            flush_table()
+            formatted, markdown_state = format_markdown_line(line, markdown_state)
+            print(formatted)
+        sys.stdout.flush()
+
+    def display(text):
+        nonlocal main_buffer, visible_started
+        main_buffer += text
+        if not visible_started and not main_buffer.strip():
+            return
+        if not visible_started:
+            spinner.stop()
+            visible_started = True
+            print()
+        while '\n' in main_buffer:
+            line, main_buffer = main_buffer.split('\n', 1)
+            render_line(line)
 
     try:
+        spinner.start()
+        response = requests.post(API_URL, headers=headers, json={**data, 'stream': True},
+                                 stream=True, timeout=DEFAULT_TIMEOUT)
+        if response.status_code != 200:
+            return response.status_code, response.text
         for raw_line in response.iter_lines():
             if not raw_line:
                 continue
-            line_str = raw_line.decode('utf-8')
-            if line_str.startswith("data: "):
-                payload_str = line_str[6:].strip()
-                if payload_str == "[DONE]":
-                    break
-                try:
-                    payload = json.loads(payload_str)
-                    delta = payload["choices"][0]["delta"]
-                    content_chunk = delta.get("content", "")
-                    reasoning_chunk = delta.get("reasoning_content", "") or delta.get("reasoning", "")
-                except Exception:
-                    continue
-
-                # 1. Explicit reasoning chunk dari API
-                if reasoning_chunk:
-                    if not thinking_printed:
-                        print(f"\n  {COLOR_DIM}{ITALIC}Penalaran {reasoning_label}…{RESET}")
-                        thinking_printed = True
-                        in_thinking_mode = True
-
-                    thinking_buffer += reasoning_chunk
-                    while "\n" in thinking_buffer:
-                        line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
-                        formatted_t = format_clean_thinking_line(line_to_print)
-                        if formatted_t:
-                            print(formatted_t)
-                        sys.stdout.flush()
-                    continue
-
-                if not content_chunk:
-                    continue
-
-                full_content += content_chunk
-
-                # 2. Tag <think> dalam teks
-                if "<think>" in full_content and "</think>" not in full_content:
-                    if not thinking_printed:
-                        print(f"\n  {COLOR_DIM}{ITALIC}Penalaran {reasoning_label}…{RESET}")
-                        thinking_printed = True
-                        in_thinking_mode = True
-                    
-                    think_chunk = content_chunk.replace("<think>", "")
-                    thinking_buffer += think_chunk
-                    while "\n" in thinking_buffer:
-                        line_to_print, thinking_buffer = thinking_buffer.split("\n", 1)
-                        formatted_t = format_clean_thinking_line(line_to_print)
-                        if formatted_t:
-                            print(formatted_t)
-                        sys.stdout.flush()
-                    continue
-
-                # 3. Transisi saat tag </think> selesai atau sebelum main buffer diprint
-                if thinking_printed and (in_thinking_mode or "</think>" in full_content):
-                    if thinking_buffer:
-                        formatted_t = format_clean_thinking_line(thinking_buffer)
-                        if formatted_t:
-                            print(formatted_t)
-                        thinking_buffer = ""
-                    if in_thinking_mode:
-                        in_thinking_mode = False
-                        print()
-                        print()
-
-                # 4. Deteksi awal tool call XML
-                if "<tool_call>" in full_content or tool_call_detected:
-                    tool_call_detected = True
-                    continue
-
-                # 5. Render baris konten utama
-                clean_chunk = content_chunk.replace("</think>", "")
-                main_buffer += clean_chunk
-                
-                while "\n" in main_buffer:
-                    line_to_print, main_buffer = main_buffer.split("\n", 1)
-                    stripped_l = line_to_print.strip()
-                    
-                    if stripped_l.startswith("|"):
-                        table_buffer.append(line_to_print)
-                    else:
-                        flush_table_buffer()
-                        row, markdown_state = format_markdown_line(line_to_print, markdown_state)
-                        print(row)
-                    sys.stdout.flush()
-
-        # Flush sisa buffer jika ada
-        if thinking_buffer:
-            formatted_t = format_clean_thinking_line(thinking_buffer)
-            if formatted_t:
-                print(formatted_t)
-
-        if main_buffer and not tool_call_detected:
-            stripped_l = main_buffer.strip()
-            if stripped_l.startswith("|"):
-                table_buffer.append(main_buffer)
-                flush_table_buffer()
-            else:
-                flush_table_buffer()
-                row, markdown_state = format_markdown_line(main_buffer, markdown_state)
-                print(row)
-            sys.stdout.flush()
-        else:
-            flush_table_buffer()
-
-        elapsed = time.time() - start_time
-        if not tool_call_detected and full_content.strip():
-            print(f"\n  {COLOR_DIM}* Selesai dalam {elapsed:.1f}s{RESET}")
-
-        return 200, full_content
-
-    except Exception as e:
-        flush_table_buffer()
-        return 0, f"Error streaming: {e}"
+            line = raw_line.decode('utf-8')
+            if not line.startswith('data: '):
+                continue
+            payload = line[6:].strip()
+            if payload == '[DONE]':
+                break
+            try:
+                delta = json.loads(payload)['choices'][0]['delta']
+                content = delta.get('content') or ''
+                reasoning = delta.get('reasoning_content') or delta.get('reasoning')
+            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+                continue
+            if reasoning and not visible_started:
+                spinner.set_message('Memproses permintaan...')
+            if not isinstance(content, str) or not content:
+                continue
+            visible = parser.feed(content)
+            chunks.append(visible)
+            if parser.saw_reasoning and not visible_started:
+                spinner.set_message('Memproses permintaan...')
+            if parser.tool_call and not visible_started:
+                spinner.set_message('Menyiapkan aksi...')
+            display(visible)
+        display(parser.feed('', final=True))
+        if main_buffer.strip():
+            render_line(main_buffer)
+        flush_table()
+        if not visible_started and not parser.tool_call:
+            return 0, 'Layanan selesai tanpa jawaban. Coba kirim ulang permintaan.'
+        return 200, ''.join(chunks) + ''.join(parser.tool_chunks)
+    except Exception as error:
+        # Clear progress before any error text or pending answer is printed.
+        spinner.stop()
+        flush_table()
+        return 0, f'Error streaming: {error}'
+    finally:
+        spinner.stop()
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
 
 # ─── Slash Command Handlers ───────────────────────────────────────────────────
 def handle_project_command(cwd):
@@ -802,10 +789,11 @@ def main():
                     })
                     continue
                 else:
+                    activity.complete_turn()
                     break
 
         except KeyboardInterrupt:
-            print(f"\n  {COLOR_DIM}Dibatalkan. Kamu bisa lanjut mengetik.{RESET}\n")
+            print(f"\n  {COLOR_DIM}Proses dibatalkan. Kamu bisa lanjut mengetik.{RESET}\n")
             continue
         except EOFError:
             print(f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")

@@ -874,9 +874,16 @@ class ActivityLog:
     def __init__(self):
         self.entries = []
         self.group = None
+        self.started_at = None
+        self.files_read = 0
+        self.read_files = set()
 
     def begin_turn(self):
+        import time
         self.group = None
+        self.started_at = time.monotonic()
+        self.files_read = 0
+        self.read_files = set()
 
     def start(self, name, arguments):
         group = activity_group(name, arguments)
@@ -892,12 +899,27 @@ class ActivityLog:
         exit_code = re.search(r'Exit Code:\s*(-?\d+)', text)
         failed = clean.startswith(('error', 'gagal')) or (exit_code and int(exit_code.group(1)) != 0)
         cancelled = 'dibatalkan' in clean
+        if name == 'read_file' and not failed and not cancelled:
+            self.read_files.add(os.path.normcase(os.path.abspath(str(arguments.get('filepath', '')))))
+            self.files_read = len(self.read_files)
         status = '!' if failed else '-' if cancelled else ui_symbol('✓', 'OK')
         color = RED if failed else COLOR_DIM if cancelled else GREEN
         label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
         print(f'    {color}{status}{RESET} {label}')
         self.entries.append((label, text[:12000]))
         self.entries = self.entries[-20:]
+
+    def complete_turn(self):
+        import time
+        if self.started_at is None:
+            return
+        elapsed = max(0, time.monotonic() - self.started_at)
+        separator = ui_symbol('·', '/')
+        text = f'Selesai {separator} {elapsed:.0f}s'
+        if self.files_read:
+            text += f' {separator} {self.files_read} file dibaca'
+        print(f'\n  {COLOR_DIM}{text}{RESET}\n')
+        self.started_at = None
 
     def show_details(self):
         print(f'\n  {BOLD}Detail aktivitas terakhir{RESET}')

@@ -154,15 +154,17 @@ def execute_command(command, timeout=None, cwd=None):
         spinner = Spinner("Menjalankan perintah...")
         spinner.start()
 
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=cwd,
-        )
-        spinner.stop()
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=cwd,
+            )
+        finally:
+            spinner.stop()
 
         output_parts = [f"Exit Code: {result.returncode}"]
         if result.stdout:
@@ -232,6 +234,7 @@ def init_project(project_type, project_name, target_dir=None):
                 f"npx -y create-vite@latest {project_name} --template {template}"
                 f" && cd {project_name} && npm install --silent"
             )
+            spinner.stop()
             result = execute_command(cmd, timeout=DEFAULT_TIMEOUT, cwd=cwd)
             spinner.stop()
             return (
@@ -248,6 +251,7 @@ def init_project(project_type, project_name, target_dir=None):
                 f" --import-alias '@/*' --use-npm --no-git"
                 f" && cd {project_name} && npm install --silent"
             )
+            spinner.stop()
             result = execute_command(cmd, timeout=DEFAULT_TIMEOUT, cwd=cwd)
             spinner.stop()
             return (
@@ -262,6 +266,7 @@ def init_project(project_type, project_name, target_dir=None):
                 f"npx -y create-vite@latest {project_name} --template {template}"
                 f" && cd {project_name} && npm install --silent"
             )
+            spinner.stop()
             result = execute_command(cmd, timeout=DEFAULT_TIMEOUT, cwd=cwd)
             spinner.stop()
             return (
@@ -276,6 +281,7 @@ def init_project(project_type, project_name, target_dir=None):
                 f"npx -y create-vite@latest {project_name} --template {template}"
                 f" && cd {project_name} && npm install --silent"
             )
+            spinner.stop()
             result = execute_command(cmd, timeout=DEFAULT_TIMEOUT, cwd=cwd)
             spinner.stop()
             return (
@@ -433,6 +439,7 @@ def init_project(project_type, project_name, target_dir=None):
             )
 
         if project_type in ("django",):
+            spinner.stop()
             result = execute_command(
                 f"django-admin startproject {project_name} . && python manage.py migrate",
                 timeout=DEFAULT_TIMEOUT, cwd=full_path
@@ -509,6 +516,7 @@ def init_project(project_type, project_name, target_dir=None):
 
         if project_type in ("laravel",):
             cmd = f"composer create-project --prefer-dist laravel/laravel {project_name} --no-interaction"
+            spinner.stop()
             result = execute_command(cmd, timeout=DEFAULT_TIMEOUT, cwd=cwd)
             spinner.stop()
             return (
@@ -590,6 +598,10 @@ def init_project(project_type, project_name, target_dir=None):
     except Exception as e:
         spinner.stop()
         return f"❌ Error saat membuat project: {str(e)}"
+
+    finally:
+        spinner.stop()
+
 
 # ─── System Time & Date Tool ──────────────────────────────────────────────────
 def get_system_time():

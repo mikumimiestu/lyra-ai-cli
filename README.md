@@ -1,7 +1,7 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  [Logo ASCII LYRA CLI asli]  v2.4.1
+  [Logo ASCII LYRA CLI asli]  v2.5.0
 
   Lyra Orpheus 6 · reasoning medium
   ~/projects/amagi-cli
@@ -11,6 +11,14 @@
 
   ›
 ```
+
+### Baru di v2.5.0 — Thinking yang ringkas
+
+- Indikator satu baris memakai waktu nyata: menunggu respons, memproses permintaan saat model mengirim penalaran, atau menyiapkan aksi ketika tool call diterima.
+- Metadata model dan effort terlihat tanpa mencetak penalaran panjang. Penalaran tidak disimpan di detail aktivitas atau riwayat percakapan baru; jawaban dan tool call tetap diproses.
+- Indikator dibersihkan sebelum jawaban ditampilkan. Selesai satu tugas, ringkasan menampilkan durasi seluruh tugas dan jumlah file unik yang berhasil dibaca lewat tool.
+- Ctrl+C, error koneksi, dan timeout membersihkan indikator serta menutup koneksi streaming. Indikator scaffolding dihentikan sebelum konfirmasi atau eksekusi perintah berikutnya.
+- Terminal sederhana memakai status teks; `LYRA_ASCII=1` memakai karakter sederhana dan `LYRA_NO_ANIMATION=1` menonaktifkan animasi indikator.
 
 ### Perbaikan v2.4.1
 
@@ -91,7 +99,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.1.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.5.0.tar.gz
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -165,7 +173,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.1.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.5.0.tar.gz
 ```
 
 #### Method 3: Local Clone Installation
