@@ -20,7 +20,7 @@ export function SiteMotion() {
   useEffect(() => {
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     if (reducedMotion.matches) return;
-    const targets = document.querySelectorAll('.section, .index-strip, .model-table-row, .two-column-notes > section, .docs-content > section, .release-items > li');
+    const targets = document.querySelectorAll('.section, .index-strip, .model-table-row, .two-column-notes > section, .docs-content > section, .release-entry, .local-tools article');
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {

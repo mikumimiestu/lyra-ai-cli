@@ -51,6 +51,9 @@ function installerEndpoint(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __AMAGI_CLI_VERSION__: JSON.stringify(readFileSync(path.resolve(import.meta.dirname, '../version.txt'), 'utf8').trim()),
+  },
   plugins: [
     react(),
     tailwindcss(),
