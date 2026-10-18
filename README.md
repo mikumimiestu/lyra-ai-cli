@@ -1,7 +1,7 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  [Logo ASCII LYRA CLI asli]  v2.4.0
+  [Logo ASCII LYRA CLI asli]  v2.4.1
 
   Lyra Orpheus 6 · reasoning medium
   ~/projects/amagi-cli
@@ -11,6 +11,10 @@
 
   ›
 ```
+
+### Perbaikan v2.4.1
+
+Memperbaiki pesan `Window too small` yang keliru muncul di terminal besar: tinggi bingkai kini memperhitungkan ruang minimum autocomplete dan kedua garis bingkai. Saat terminal sangat kecil, bingkai dan status disembunyikan sementara agar input tetap bisa digunakan. Ukuran status mengikuti ukuran output editor saat terminal di-resize.
 
 ### Baru di v2.4.0 — Lyra Console
 
@@ -87,7 +91,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.1.tar.gz
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -161,7 +165,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.1.tar.gz
 ```
 
 #### Method 3: Local Clone Installation

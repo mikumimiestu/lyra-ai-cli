@@ -125,6 +125,44 @@ class ConsoleTests(unittest.TestCase):
             pipe.send_text('hello\x1b\rworld\r')
             self.assertEqual(editor.read(), 'hello\nworld')
 
+    def test_real_renderer_never_reports_a_small_window_on_large_terminal(self):
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output.vt100 import Vt100_Output
+        from prompt_toolkit.data_structures import Size
+        screen = io.StringIO()
+        output = Vt100_Output(screen, get_size=lambda: Size(rows=40, columns=120), enable_cpr=False)
+        with create_pipe_input() as pipe, patch.object(styling, 'unicode_terminal', return_value=True):
+            editor = styling.TerminalInput(lambda: dict(model='Lyra Orpheus 6', effort='medium', directory='/work'),
+                                          input_stream=pipe, output_stream=output)
+            pipe.send_text('hello\r')
+            self.assertEqual(editor.read(), 'hello')
+        self.assertNotIn('Window too small', screen.getvalue())
+
+    def test_real_renderer_handles_resize_without_minimum_height_errors(self):
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output.vt100 import Vt100_Output
+        from prompt_toolkit.data_structures import Size
+        screen = io.StringIO()
+        sizes = [Size(rows=40, columns=120), Size(rows=4, columns=20),
+                 Size(rows=7, columns=24), Size(rows=12, columns=32), Size(rows=40, columns=120)]
+        current = [0]
+        output = Vt100_Output(screen, get_size=lambda: sizes[current[0]], enable_cpr=False)
+        with create_pipe_input() as pipe, patch.object(styling, 'unicode_terminal', return_value=True):
+            editor = styling.TerminalInput(lambda: dict(model='Lyra Orpheus 6', effort='medium', directory='/work'),
+                                          input_stream=pipe, output_stream=output)
+            def resize_after_render(application):
+                if application.is_done:
+                    return
+                if current[0] < len(sizes) - 1:
+                    current[0] += 1
+                    application.invalidate()
+                else:
+                    pipe.send_text('hello\r')
+            editor.session.app.after_render += resize_after_render
+            self.assertEqual(editor.read(), 'hello')
+        self.assertEqual(current[0], len(sizes) - 1)
+        self.assertNotIn('Window too small', screen.getvalue())
+
     def test_ascii_editor_accepts_input_without_unicode_frame(self):
         from prompt_toolkit.input import create_pipe_input
         from prompt_toolkit.output import DummyOutput

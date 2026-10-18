@@ -24,7 +24,7 @@ Tiga file instalasi tersedia saat development, preview, dan di hasil build:
 
 - `/install`: script asli `../install.sh`.
 - `/install.ps1`: script asli `../install.ps1`.
-- `/packages/amagi_cli-2.4.0.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
+- `/packages/amagi_cli-2.4.1.tar.gz`: paket source pip dari versi CLI di `version.txt` dan modul yang terdaftar di `setup.py`. Nama paket mengikuti versi secara otomatis. Paket hanya berisi modul aplikasi, setup, README, dan versi.
 
 Perintah instalasi:
 
@@ -37,7 +37,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 ```
 
 ```sh
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.4.1.tar.gz
 ```
 
 Domain perlu mengarah ke deployment website ini agar URL publik berfungsi. Layani ketiga file sebelum aturan fallback SPA, tanpa autentikasi atau redirect. Gunakan `Content-Type: text/plain; charset=utf-8` untuk script dan `application/gzip` untuk paket bila hosting mendukung pengaturan header. Script Bash dan PowerShell tetap mengambil file aplikasi dari GitHub. Pip mengunduh paket aplikasi dari domain ini dan dependensi melalui index pip yang dikonfigurasi pengguna.

@@ -593,7 +593,10 @@ try:
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style
     from prompt_toolkit.formatted_text import ANSI
-    from prompt_toolkit.layout.containers import HSplit, to_container
+    from prompt_toolkit.layout.containers import HSplit, to_container, ConditionalContainer, DynamicContainer
+    from prompt_toolkit.layout.dimension import Dimension
+    from prompt_toolkit.data_structures import Size
+    from prompt_toolkit.filters import Condition
     from prompt_toolkit.widgets import Frame
     EDITOR_AVAILABLE = True
 except ImportError:
@@ -602,16 +605,39 @@ except ImportError:
 
 if EDITOR_AVAILABLE:
     class ConsoleSession(PromptSession):
+        def _terminal_size(self):
+            output = getattr(getattr(self, 'app', None), 'output', None) or getattr(self, '_output', None)
+            return output.get_size() if output else Size(rows=24, columns=get_terminal_width())
+
+        def _can_frame(self):
+            size = self._terminal_size()
+            return unicode_terminal() and size.rows >= 7 and size.columns >= 24
+
+        def _get_default_buffer_control_height(self):
+            size = self._terminal_size()
+            if size.rows < 7 or size.columns < 24:
+                return Dimension(min=1)
+            return super()._get_default_buffer_control_height()
+
         def _frame_height(self):
-            columns = self.app.output.get_size().columns if hasattr(self, 'app') else get_terminal_width()
-            width = max(1, columns - 6)
+            width = max(1, self._terminal_size().columns - 6)
             rows = sum(max(1, (str_width(line) + width - 1) // width) for line in self.default_buffer.document.lines)
-            return min(8, rows + 2)
+            # Autocomplete reserves buffer rows even before its menu is visible.
+            # Account for those rows plus BOTH borders; a 3-row frame cannot
+            # contain a 3-row buffer, regardless of the physical window size.
+            minimum = self._get_default_buffer_control_height().min
+            return min(8, max(rows, minimum, 1) + 2)
 
         def _create_layout(self):
             layout = super()._create_layout()
-            if unicode_terminal() and isinstance(layout.container, HSplit):
-                layout.container.children[0] = to_container(Frame(layout.container.children[0], title='pesan', style='class:composer', height=self._frame_height))
+            if isinstance(layout.container, HSplit):
+                body = layout.container.children[0]
+                frame = Frame(body, title='pesan', style='class:composer', height=self._frame_height)
+                framed_body = to_container(frame)
+                layout.container.children[0] = DynamicContainer(lambda: framed_body if self._can_frame() else body)
+                toolbar = layout.container.children[-1]
+                layout.container.children[-1] = ConditionalContainer(
+                    toolbar, filter=Condition(lambda: self._terminal_size().rows >= 7))
             return layout
 
     class SlashCompleter(Completer):
@@ -678,7 +704,8 @@ class TerminalInput:
     def _toolbar(self):
         context = self.context()
         text = toolbar_text(**context, branch=self.branch)
-        width = max(1, get_terminal_width() - 4)
+        columns = self.session.app.output.get_size().columns if self.session else get_terminal_width()
+        width = max(1, columns - 4)
         hints = '/ perintah   @ file   Alt+Enter baris baru'
         return ANSI('  {}{}\n  {}{}'.format(COLOR_DIM, fit_console_text(text, width), fit_console_text(hints, width), RESET))
 

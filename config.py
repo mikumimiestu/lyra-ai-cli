@@ -79,7 +79,7 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ API Key berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
