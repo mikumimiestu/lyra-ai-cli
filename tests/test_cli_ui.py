@@ -83,7 +83,6 @@ class AppTests(unittest.TestCase):
     def test_welcome_is_compact_and_uses_current_version(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=60):
-            styling.print_logo()
             styling.render_header('Lyra Orpheus 6', 'medium', '/work')
         plain = styling.strip_ansi(output.getvalue())
         self.assertIn('v' + VERSION, plain)
@@ -91,6 +90,20 @@ class AppTests(unittest.TestCase):
         self.assertNotIn('██', plain)
         self.assertNotIn('Perintah Utama:', plain)
         self.assertLess(len(plain.splitlines()), 14)
+
+    def test_original_logo_is_preserved(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=100):
+            styling.print_logo()
+        lines = [line for line in styling.strip_ansi(output.getvalue()).splitlines() if line.strip()]
+        self.assertEqual(lines, styling.LOGO_LINES)
+
+    def test_logo_adapts_to_narrow_terminals(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=30):
+            styling.print_logo()
+        self.assertIn('LYRA CLI', output.getvalue())
+        self.assertNotIn('██', output.getvalue())
 
     def test_main_commands_and_eof_without_api_or_daemon(self):
         import app

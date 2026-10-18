@@ -103,8 +103,35 @@ LOGO_LINES = [
 ]
 
 def print_logo():
-    """The welcome header owns the compact Lyra identity."""
-    pass
+    # Keep the original identity; use a readable wordmark on narrow terminals.
+    if get_terminal_width() < max(len(line) for line in LOGO_LINES) + 2:
+        print(f"\n  {BOLD}{COLOR_LYRA}LYRA CLI{RESET}\n")
+        return
+    max_y = len(LOGO_LINES) - 1
+    max_x = max(len(line) for line in LOGO_LINES) - 1
+
+    scores = []
+    for y, line in enumerate(LOGO_LINES):
+        for x, char in enumerate(line):
+            if char not in (" ", "╗", "╔", "╝", "╚"):
+                score = x * 1.2 + (max_y - y) * 1.0
+                scores.append(score)
+    min_score = min(scores) if scores else 0
+    max_score = max(scores) if scores else 1
+
+    print()
+    for y, line in enumerate(LOGO_LINES):
+        colored = ""
+        for x, char in enumerate(line):
+            if char == " ":
+                colored += " "
+            else:
+                score = x * 1.2 + (max_y - y) * 1.0
+                t = (score - min_score) / (max_score - min_score) if max_score > min_score else 0.5
+                r, g, b = get_gradient_color(t)
+                colored += rgb_to_ansi(r, g, b) + BOLD + char
+        print(colored + RESET)
+    print()
 
 
 # ─── Terminal Layout Helpers ──────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  ✦ Lyra CLI  v2.3.0
+  ✦ Lyra CLI  v2.3.1
 
   Lyra Orpheus 6 · reasoning medium
   ~/projects/amagi-cli
@@ -11,6 +11,10 @@
 
   ›
 ```
+
+### Perbaikan v2.3.1
+
+Logo ASCII Lyra CLI dengan gradasi biru–ungu–pink dikembalikan pada tampilan awal. Terminal sempit memakai wordmark sederhana agar logo tidak terpotong. Input interaktif dan header ringkas dari v2.3.0 tetap tersedia.
 
 ### Baru di v2.3.0
 
@@ -73,7 +77,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.1.tar.gz
 ```
 
 #### Metode 3: Instalasi Lokal (Developer Mode)
@@ -147,7 +151,7 @@ iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex
 
 #### Method 2: Via Pip (Cross-Platform)
 ```bash
-pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.0.tar.gz
+pip install https://amagi-cli.astbyte.com/packages/amagi_cli-2.3.1.tar.gz
 ```
 
 #### Method 3: Local Clone Installation

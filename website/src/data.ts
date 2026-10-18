@@ -1,5 +1,5 @@
 export const repository = 'https://github.com/mikumimiestu/lyra-ai-cli';
-export const version = '2.3.0';
+export const version = '2.3.1';
 export const installers = [
   { label: 'macOS / Linux', shell: 'Terminal', command: 'curl -sSf https://amagi-cli.astbyte.com/install | bash' },
   { label: 'Windows', shell: 'PowerShell', command: 'iwr -useb https://amagi-cli.astbyte.com/install.ps1 | iex' },

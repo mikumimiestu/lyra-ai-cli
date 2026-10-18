@@ -36,7 +36,7 @@ export function TerminalPreview() {
   const session = sessions[active];
   return <div className="terminal-wrap"><div className="terminal">
     <div className="terminal-bar"><span className="terminal-dots"><i /><i /><i /></span><span>amagi — ~/projects/catatan</span><span>01</span></div>
-    <div className="terminal-body"><div className="terminal-brand">AMAGI<span>CLI / 2.3.0</span></div><p className="terminal-muted">AstByte Lyra · Orpheus 6 · medium</p><div className="terminal-divider" /><p className="terminal-prompt"><span>❯</span> {session.command}</p><pre key={active}>{session.lines.join('\n')}</pre><div className="terminal-cursor">❯ <span /></div></div>
+    <div className="terminal-body"><div className="terminal-brand">AMAGI<span>CLI / 2.3.1</span></div><p className="terminal-muted">AstByte Lyra · Orpheus 6 · medium</p><div className="terminal-divider" /><p className="terminal-prompt"><span>❯</span> {session.command}</p><pre key={active}>{session.lines.join('\n')}</pre><div className="terminal-cursor">❯ <span /></div></div>
     <div className="terminal-status"><span><i /> Direktori lokal</span><span>Contoh tampilan</span></div>
   </div><div className="demo-tabs" role="group" aria-label="Contoh penggunaan">{sessions.map((item, index) => <button key={item.label} aria-pressed={index === active} onClick={() => setActive(index)}><span>0{index + 1}</span>{item.label}</button>)}</div><p className="demo-caption" aria-live="polite">{session.note}</p></div>;
 }
