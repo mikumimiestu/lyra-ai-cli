@@ -187,13 +187,14 @@ class ModelListTests(unittest.TestCase):
     def test_current_models_and_default(self):
         self.assertEqual([(m['name'], m['id']) for m in app.MODELS], [
             ('Lyra Luma 6.1', 'lyra-luma-6-1'), ('Lyra Luma 4 mini', 'lyra-luma-4-mini'),
-            ('Lyra Orpheus 6', 'lyra-orpheus-6'), ('Lyra Eurydice 6', 'lyra-eurydice-6')])
+            ('Lyra Orpheus 6', 'lyra-orpheus-6'), ('Lyra Eurydice 6', 'lyra-eurydice-6'),
+            ('Lyra Luma Flash', 'lyra-luma-flash')])
         self.assertEqual(app.MODELS[app.DEFAULT_MODEL_INDEX]['id'], 'lyra-orpheus-6')
-        self.assertEqual([m['supports_reasoning'] for m in app.MODELS], [True, False, True, True])
+        self.assertEqual([m['supports_reasoning'] for m in app.MODELS], [True, False, True, True, False])
 
     def test_legacy_ids_are_redirected(self):
         for old, new in [('lyra-luma-5.5', 'lyra-luma-6-1'), ('mimo-v2.5', 'lyra-luma-6-1'),
-                         ('lyra-luma-flash', 'lyra-luma-6-1'), ('lyra-luma-6.1', 'lyra-luma-6-1'),
+                         ('lyra-luma-6.1', 'lyra-luma-6-1'), ('lyra-luma-flash', 'lyra-luma-flash'),
                          ('lyra-nebula-4', 'lyra-luma-4-mini'), ('lyra-orpheus-6', 'lyra-orpheus-6')]:
             self.assertEqual(app.canonical_model_id(old), new)
         self.assertEqual(app.canonical_model_id('model-baru'), 'model-baru')

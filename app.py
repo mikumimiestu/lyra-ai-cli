@@ -66,6 +66,11 @@ MODELS = [
         "name":               "Lyra Eurydice 6",
         "supports_reasoning": True,
     },
+    {
+        "id":                 "lyra-luma-flash",
+        "name":               "Lyra Luma Flash",
+        "supports_reasoning": False,
+    },
 ]
 
 DEFAULT_MODEL_INDEX = 2   # Lyra Orpheus 6
@@ -73,7 +78,6 @@ DEFAULT_MODEL_INDEX = 2   # Lyra Orpheus 6
 # Ids that older configs or sessions may still carry. They are rewritten on read and never sent to the API.
 LEGACY_MODEL_IDS = {
     "lyra-luma-5.5":   "lyra-luma-6-1",
-    "lyra-luma-flash": "lyra-luma-6-1",   # id used by the Luma 5.5 entry before this change
     "mimo-v2.5":       "lyra-luma-6-1",
     "lyra-luma-6.1":   "lyra-luma-6-1",   # alias accepted by the backend; keep one canonical spelling
     "lyra-nebula-4":   "lyra-luma-4-mini",
