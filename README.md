@@ -94,8 +94,8 @@ Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untu
 *   **Pilihan Model AI Generasi Terbaru:**
     *   `Lyra Orpheus 6` - Model penalaran canggih & kreasi kode tingkat tinggi.
     *   `Lyra Eurydice 6` - Model penalaran mendalam dengan tingkat presisi tinggi.
-    *   `Lyra Nebula 4` - Paling mampu untuk pekerjaan kompleks & skala besar.
-    *   `Lyra Luma 5.5 (instant)` - Tercepat & responsif untuk tugas instan sehari-hari.
+    *   `Lyra Luma 4 mini` - Ringkas dan hemat untuk pekerjaan sehari-hari.
+    *   `Lyra Luma 6.1 (instant)` - Tercepat & responsif untuk tugas instan sehari-hari.
 *   **Pengaturan Tingkat Penalaran (Reasoning Effort):** Pilihan penalaran `Cepat (Low effort)` atau `Sedang (Medium effort)` via `/reasoning` atau `/model`.
 *   **Auto-Update Otomatis:** Deteksi versi baru dari GitHub di latar belakang dan opsi perbarui aplikasi langsung dengan perintah `/update`.
 *   **Render Tabel Grid Presisi:** Otomatis mengubah tabel Markdown dari respons AI menjadi tabel Unicode Box Grid (`┌───┬───┐`, `├───┼───┤`, `└───┴───┘`) yang rapi dan terukur.
@@ -143,7 +143,7 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | :--- | :--- |
 | `/status` | Ringkasan sesi: versi, model, direktori, konteks, daemon |
 | `/todos` | Lihat daftar tugas yang sedang dikerjakan Lyra |
-| `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Nebula 4, Luma 5.5) |
+| `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Luma 4 mini, Luma 6.1) |
 | `/reasoning` | Atur tingkat penalaran (`cepat` / `sedang`) |
 | `/memory` | Kelola memori jangka panjang (`~/.amagi_memory.md`) |
 | `/time` | Lihat tanggal, waktu, dan timezone laptop pengguna |
@@ -172,8 +172,8 @@ Amagi CLI is a modern, interactive terminal chat client for **AstByte Lyra**. It
 *   **Next-Gen AI Models:**
     *   `Lyra Orpheus 6` - Advanced reasoning & high-level code creation.
     *   `Lyra Eurydice 6` - Deep reasoning with high precision.
-    *   `Lyra Nebula 4` - Powerful model for complex tasks.
-    *   `Lyra Luma 5.5 (instant)` - Ultra-fast & responsive for daily tasks.
+    *   `Lyra Luma 4 mini` - Compact and economical for everyday work.
+    *   `Lyra Luma 6.1 (instant)` - Ultra-fast & responsive for daily tasks.
 *   **Reasoning Effort Controls:** Switch reasoning speed between `Fast (Low effort)` and `Medium (Medium effort)` via `/reasoning` or `/model`.
 *   **Precision Grid Table Renderer:** Automatically parses Markdown tables from AI responses into crisp Unicode Box Grid tables (`┌───┬───┐`, `├───┼───┤`, `└───┴───┘`).
 *   **Clean Multi-line Execution Dialogs:** Indented, syntax-highlighted execution approval boxes for multi-line scripts and commands.

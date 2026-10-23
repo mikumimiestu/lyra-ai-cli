@@ -183,5 +183,50 @@ class StatusAndContextTests(unittest.TestCase):
         self.assertIn('/todos', names)
 
 
+class ModelListTests(unittest.TestCase):
+    def test_current_models_and_default(self):
+        self.assertEqual([(m['name'], m['id']) for m in app.MODELS], [
+            ('Lyra Luma 6.1', 'lyra-luma-6-1'), ('Lyra Luma 4 mini', 'lyra-luma-4-mini'),
+            ('Lyra Orpheus 6', 'lyra-orpheus-6'), ('Lyra Eurydice 6', 'lyra-eurydice-6')])
+        self.assertEqual(app.MODELS[app.DEFAULT_MODEL_INDEX]['id'], 'lyra-orpheus-6')
+        self.assertEqual([m['supports_reasoning'] for m in app.MODELS], [True, False, True, True])
+
+    def test_legacy_ids_are_redirected(self):
+        for old, new in [('lyra-luma-5.5', 'lyra-luma-6-1'), ('mimo-v2.5', 'lyra-luma-6-1'),
+                         ('lyra-luma-flash', 'lyra-luma-6-1'), ('lyra-luma-6.1', 'lyra-luma-6-1'),
+                         ('lyra-nebula-4', 'lyra-luma-4-mini'), ('lyra-orpheus-6', 'lyra-orpheus-6')]:
+            self.assertEqual(app.canonical_model_id(old), new)
+        self.assertEqual(app.canonical_model_id('model-baru'), 'model-baru')
+
+    def test_saved_config_with_old_id_is_migrated_not_crashing(self):
+        config = {'model': 'lyra-nebula-4', 'model_index': 2, 'reasoning_effort': 'low'}
+        self.assertTrue(app.migrate_model_config(config))
+        self.assertEqual(config['model'], 'lyra-luma-4-mini')
+        self.assertEqual(config['model_index'], 1)
+        config = {'model_id': 'mimo-v2.5'}
+        self.assertTrue(app.migrate_model_config(config))
+        self.assertEqual((config['model_id'], config['model_index']), ('lyra-luma-6-1', 0))
+        self.assertFalse(app.migrate_model_config({'model_index': 2}))
+
+    def test_request_never_carries_an_old_id(self):
+        import json
+        from unittest.mock import Mock
+        sent = []
+        def post(url, headers=None, json=None, **kwargs):
+            sent.append(json['model'])
+            response = Mock(status_code=200)
+            response.iter_lines.return_value = [b'data: {"choices":[{"delta":{"content":"ok\\n"}}]}', b'data: [DONE]']
+            return response
+        with contextlib.redirect_stdout(io.StringIO()), \
+             patch.object(app, 'load_config', return_value={'model': 'lyra-nebula-4'}), patch.object(app, 'save_config'), \
+             patch.object(app, 'get_api_key', return_value='test-only'), patch.object(app, 'ensure_daemon_running'), \
+             patch.object(app, 'get_current_system_prompt', return_value='x'), \
+             patch.object(app, 'check_remote_version', return_value=(False, app.VERSION)), \
+             patch.object(app, 'TerminalInput') as editor, patch.object(app.requests, 'post', side_effect=post):
+            editor.return_value.read.side_effect = ['halo', EOFError()]
+            app.main()
+        self.assertEqual(sent, ['lyra-luma-4-mini'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -68,7 +68,7 @@ class EditorTests(unittest.TestCase):
 
     def test_toolbar_uses_live_context_and_model_capabilities(self):
         with patch.dict(os.environ, {'HOME': '/home/test'}):
-            text = cli_ui.toolbar_text('Lyra Luma 5.5', 'medium', '/home/test/work', False)
+            text = cli_ui.toolbar_text('Lyra Luma 6.1', 'medium', '/home/test/work', False)
             self.assertIn('~/work', text)
             self.assertIn('tanpa reasoning', text)
             self.assertNotIn('medium', text)

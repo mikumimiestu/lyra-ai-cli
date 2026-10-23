@@ -47,14 +47,14 @@ API_URL = "https://authx.astbyte.com/v1/chat/completions"
 # ─── Model Definitions ────────────────────────────────────────────────────────
 MODELS = [
     {
-        "id":                 "lyra-luma-flash",
-        "name":               "Lyra Luma 5.5",
-        "supports_reasoning": False,
+        "id":                 "lyra-luma-6-1",
+        "name":               "Lyra Luma 6.1",
+        "supports_reasoning": True,
     },
     {
-        "id":                 "lyra-nebula-4",
-        "name":               "Lyra Nebula 4",
-        "supports_reasoning": True,
+        "id":                 "lyra-luma-4-mini",
+        "name":               "Lyra Luma 4 mini",
+        "supports_reasoning": False,
     },
     {
         "id":                 "lyra-orpheus-6",
@@ -69,6 +69,36 @@ MODELS = [
 ]
 
 DEFAULT_MODEL_INDEX = 2   # Lyra Orpheus 6
+
+# Ids that older configs or sessions may still carry. They are rewritten on read and never sent to the API.
+LEGACY_MODEL_IDS = {
+    "lyra-luma-5.5":   "lyra-luma-6-1",
+    "lyra-luma-flash": "lyra-luma-6-1",   # id used by the Luma 5.5 entry before this change
+    "mimo-v2.5":       "lyra-luma-6-1",
+    "lyra-luma-6.1":   "lyra-luma-6-1",   # alias accepted by the backend; keep one canonical spelling
+    "lyra-nebula-4":   "lyra-luma-4-mini",
+}
+
+def canonical_model_id(model_id):
+    """Map a legacy or alias model id to the current one; unknown ids are returned unchanged."""
+    return LEGACY_MODEL_IDS.get(str(model_id).strip().lower(), model_id)
+
+def migrate_model_config(config):
+    """Redirect saved model ids to current ones. Returns True when the config changed."""
+    changed = False
+    for key in ("model", "model_id", "default_model"):
+        value = config.get(key)
+        if not isinstance(value, str):
+            continue
+        current = canonical_model_id(value)
+        if current != value:
+            config[key] = current
+            changed = True
+        for index, model in enumerate(MODELS):
+            if model["id"] == current and config.get("model_index") != index and key != "default_model":
+                config["model_index"] = index
+                changed = True
+    return changed
 
 REASONING_EFFORTS = [
     {"id": "low", "name": "Cepat (Low effort)", "desc": "Penalaran singkat, waktu respon super cepat"},
@@ -563,6 +593,8 @@ def main():
         sys.exit(0)
 
     config  = load_config()
+    if migrate_model_config(config):
+        save_config(config)
     api_key = get_api_key(config=config)
 
     headers = {
@@ -754,7 +786,7 @@ def main():
             print()
 
             while True:
-                current_model  = MODELS[model_idx]["id"]
+                current_model  = canonical_model_id(MODELS[model_idx]["id"])
                 current_effort = config.get("reasoning_effort", "medium")
 
                 data = {
