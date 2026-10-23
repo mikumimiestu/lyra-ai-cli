@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.7.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.8.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -15,6 +15,12 @@
   ╰──────────────────────────────────────────────────────╯
   Orpheus 6 · medium  |  ~/projects/amagi-cli / main
 ```
+
+### Baru di v2.8.0 — Daftar model diperbarui
+
+- Lima model: `Lyra Orpheus 6`, `Lyra Eurydice 6`, `Lyra Luma 6.1`, `Lyra Luma 4 mini`, dan `Lyra Luma Flash`. Model bawaan tetap Orpheus 6.
+- `Lyra Luma 5.5` digantikan `Lyra Luma 6.1`, dan `Lyra Nebula 4` digantikan `Lyra Luma 4 mini`. Pilihan model yang sudah tersimpan dialihkan otomatis; id lama tidak pernah dikirim ke server.
+- Perbaikan installer Windows: koma ganda di `install.ps1` yang membuat instalasi gagal dengan error `Cannot convert 'System.Object[]'`.
 
 ### Baru di v2.7.0 — Streaming halus, Esc, dan daftar tugas
 
