@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import threading
+import time
 
 # ─── Import custom modules ────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ from styling import (
     render_header, render_footer_bar, render_markdown_table,
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
-from spinner import Spinner, EscapeWatcher
+from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported, run_live
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
                      USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE)
@@ -318,6 +319,12 @@ def handle_update_command(interactive=True):
 
 def restart_application():
     """Replace this process with a fresh one so an update takes effect without retyping `amagi`."""
+    if LIVE.active:
+        LIVE.shutdown()               # hand the terminal back before the process image is replaced
+        for _ in range(50):
+            if not LIVE.active:
+                break
+            time.sleep(0.05)
     sys.stdout.flush()
     try:
         if os.name == "nt":
@@ -464,9 +471,16 @@ def stream_ai_response(headers, data, model_info=None):
         if not visible_started:
             if not text.strip():
                 return
-            spinner.stop()
             visible_started = True
-            sys.stdout.write('\n')
+            if LIVE.active:
+                spinner.set_message('Menulis jawaban...')   # the status line stays up while text streams
+                LIVE.write_stream('\n')
+            else:
+                spinner.stop()
+                sys.stdout.write('\n')
+        if LIVE.active:
+            LIVE.write_stream(text)
+            return
         sys.stdout.write(text)
         sys.stdout.flush()
 
@@ -479,9 +493,12 @@ def stream_ai_response(headers, data, model_info=None):
         with EscapeWatcher():
             response = requests.post(API_URL, headers=headers, json={**data, 'stream': True},
                                      stream=True, timeout=DEFAULT_TIMEOUT)
+            LIVE.response = response
+            LIVE.check_cancel()
             if response.status_code != 200:
                 return response.status_code, response.text
             for raw_line in response.iter_lines():
+                LIVE.check_cancel()
                 if not raw_line:
                     continue
                 line = raw_line.decode('utf-8')
@@ -496,7 +513,7 @@ def stream_ai_response(headers, data, model_info=None):
                     reasoning = delta.get('reasoning_content') or delta.get('reasoning')
                 except (ValueError, KeyError, IndexError, TypeError, AttributeError):
                     continue
-                if not visible_started:
+                if not visible_started or LIVE.active:
                     spinner.add_tokens(len(reasoning or '') + (len(content) if isinstance(content, str) else 0))
                 if reasoning and not visible_started:
                     spinner.set_message('Memproses permintaan...')
@@ -518,6 +535,8 @@ def stream_ai_response(headers, data, model_info=None):
         # Clear progress before any error text or pending answer is printed.
         spinner.stop()
         renderer.abort()
+        if LIVE.cancel_requested():      # Esc closed the connection under us
+            LIVE.check_cancel()
         return 0, f'Error streaming: {error}'
     except BaseException:
         spinner.stop()
@@ -525,6 +544,9 @@ def stream_ai_response(headers, data, model_info=None):
         raise
     finally:
         spinner.stop()
+        LIVE.response = None
+        if LIVE.active:
+            LIVE.flush_stream()
         if response is not None:
             try:
                 response.close()
@@ -675,6 +697,13 @@ def main():
         run_reminder_daemon_loop()
         sys.exit(0)
 
+    if live_supported():
+        # The composer stays at the bottom while Lyra works; the agent loop runs in a worker thread.
+        run_live(_run_session)
+    else:
+        _run_session(None)
+
+def _run_session(live=None):
     config  = load_config()
     if migrate_model_config(config):
         save_config(config)
@@ -724,7 +753,10 @@ def main():
         "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
         "context_pct": context_percent(messages),
         "approval": APPROVAL.mode,
-    }, on_cycle_mode=APPROVAL.cycle)
+    }, on_cycle_mode=APPROVAL.cycle, **({"live": live} if live is not None else {}))
+    if live is not None:
+        live.editor = editor
+        live.ready.set()
 
     activity = ActivityLog()
 
@@ -885,7 +917,6 @@ def main():
             if not context_warned and context_percent(messages) >= 90:
                 context_warned = True
                 print(f"\n  {YELLOW}{ui_symbol('⚠', '!')} Konteks hampir penuh (~{context_percent(messages)}%). Pertimbangkan /clear agar jawaban tetap akurat.{RESET}")
-            print()
 
             while True:
                 current_model  = canonical_model_id(MODELS[model_idx]["id"])
@@ -933,6 +964,7 @@ def main():
                         print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
                         break
 
+                    LIVE.check_cancel()
                     activity.start(func_name, args)
 
                     if func_name == "list_directory":

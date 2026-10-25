@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.9.1 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.10.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -23,6 +23,17 @@
   Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
   ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Baru di v2.10.0 — Input tetap di bawah, seperti Claude Code
+
+- **Area hidup di bawah layar:** kotak input, footer, status, dan baris jawaban yang sedang mengalir tetap berada di bawah. Baris yang sudah selesai dicetak ke atas dan masuk ke scrollback terminal, jadi riwayat chat tetap bisa di-scroll dan disalin.
+- **Status selalu tampil:** `✢ Menulis jawaban... (12s · ↓ 1,1k token · Esc batal)` tetap terlihat selama Lyra menjawab, lengkap dengan baris tips.
+- **Ketik saat Lyra bekerja:** pesan yang kamu kirim sementara Lyra masih bekerja masuk antrean dan dijalankan berurutan.
+- **Esc atau Ctrl+C langsung membatalkan** jawaban yang sedang mengalir, tanpa menunggu. Pesan antrean berikutnya tetap berjalan.
+- **Izin dan menu tetap berfungsi:** konfirmasi `y/n` dan menu panah menjeda area hidup sebentar, lalu mengembalikannya.
+- **Saat sesi baru dibuka**, kotak input berada tepat di bawah kartu sambutan dan turun ke dasar layar begitu percakapan memenuhi terminal.
+- Mode ini aktif di macOS dan Linux pada terminal interaktif. Windows, pipe, dan `TERM=dumb` memakai prompt klasik seperti sebelumnya; `LYRA_CLASSIC=1` memaksa prompt klasik di mana saja.
+- Pengguna versi lama tidak perlu langkah ekstra: fitur ini ikut terunduh lewat `/update` lalu `/restart`.
 
 ### Baru di v2.9.1 — Menu dengan tombol panah
 

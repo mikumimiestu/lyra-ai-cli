@@ -622,6 +622,7 @@ try:
     from prompt_toolkit.styles import Style
     from prompt_toolkit.formatted_text import ANSI
     from prompt_toolkit.layout.containers import HSplit, Window, to_container, ConditionalContainer, DynamicContainer
+    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.data_structures import Size
     from prompt_toolkit.filters import Condition
@@ -632,6 +633,10 @@ except ImportError:
 
 if EDITOR_AVAILABLE:
     class ConsoleSession(PromptSession):
+        def __init__(self, *args, live=None, **kwargs):
+            self._live = live           # must exist before PromptSession builds the layout
+            super().__init__(*args, **kwargs)
+
         def _terminal_size(self):
             output = getattr(getattr(self, 'app', None), 'output', None) or getattr(self, '_output', None)
             return output.get_size() if output else Size(rows=24, columns=get_terminal_width())
@@ -671,6 +676,16 @@ if EDITOR_AVAILABLE:
                 toolbar = layout.container.children[-1]
                 layout.container.children[-1] = ConditionalContainer(
                     toolbar, filter=Condition(lambda: self._terminal_size().rows >= 7))
+                live = self._live
+                if live is not None:
+                    # Above the composer: the answer line being streamed, then the status line.
+                    streaming = Window(FormattedTextControl(lambda: ANSI(live.partial)), wrap_lines=True,
+                                       dont_extend_height=True)
+                    status = Window(FormattedTextControl(lambda: ANSI(live.status_text())), dont_extend_height=True)
+                    layout.container.children[0:0] = [
+                        to_container(ConditionalContainer(streaming, filter=Condition(lambda: bool(live.partial)))),
+                        to_container(ConditionalContainer(status, filter=Condition(live.status_visible))),
+                    ]
             return layout
 
     class SlashCompleter(Completer):
@@ -684,8 +699,9 @@ if EDITOR_AVAILABLE:
 
 
 class TerminalInput:
-    def __init__(self, context, input_stream=None, output_stream=None, on_cycle_mode=None):
+    def __init__(self, context, input_stream=None, output_stream=None, on_cycle_mode=None, live=None):
         self.context = context
+        self.live = live
         self.on_cycle_mode = on_cycle_mode
         self.session = None
         self._bindings = None
@@ -696,10 +712,28 @@ class TerminalInput:
         if EDITOR_AVAILABLE and (interactive or input_stream is not None):
             bindings = KeyBindings()
 
-            @bindings.add('escape', 'enter')
+            idle = Condition(lambda: live is None or not live.busy)
+
+            @bindings.add('escape', 'enter', filter=idle)
             @bindings.add('c-j')
             def newline(event):
                 event.current_buffer.insert_text('\n')
+
+            if live is not None:
+                @bindings.add('escape', filter=~idle, eager=True)
+                def cancel_turn(event):
+                    live.request_cancel()
+
+                @bindings.add('c-c')
+                def interrupt(event):
+                    if live.busy:
+                        live.request_cancel()
+                    else:
+                        event.current_buffer.reset()
+
+                @bindings.add('c-d', filter=idle & Condition(lambda: not self.session.default_buffer.text))
+                def leave(event):
+                    live.submit_eof()
 
             @bindings.add('s-tab')
             def cycle_mode(event):
@@ -742,7 +776,17 @@ class TerminalInput:
                 output=output_stream,
                 reserve_space_for_menu=3,
                 erase_when_done=True,
+                live=live,
+                **({'refresh_interval': 0.1} if live is not None else {}),
             )
+            if live is not None:
+                self.session.app.ttimeoutlen = 0.05      # a lone Esc must cancel at once
+                def accept(buffer):
+                    text = buffer.text.strip()
+                    if text:
+                        live.submit(text)
+                    return False        # keep the application running; the buffer is cleared
+                self.session.default_buffer.accept_handler = accept
 
     def _toolbar(self):
         context = dict(self.context())
@@ -768,7 +812,25 @@ class TerminalInput:
             second += (' ' * gap if gap >= 3 else '') + f'{RESET}{tone}{notice}'
         return ANSI('  {}{}{}\n  {}{}'.format(color, fit_console_text(text, width), RESET, second, RESET))
 
+    def run_live(self):
+        """Own the terminal for the whole session (main thread); the worker thread feeds read()."""
+        live = self.live
+
+        def attach():
+            import asyncio
+            live.attach(self.session.app, asyncio.get_running_loop())
+
+        try:
+            self.session.prompt(ANSI(' {}{}{}{} '.format(BOLD, COLOR_LYRA, ui_symbol('›', '>'), RESET)), pre_run=attach)
+        except (EOFError, KeyboardInterrupt):
+            pass
+        finally:
+            live.detach()
+
     def read(self):
+        if self.live is not None:
+            self.branch = workspace_branch(self.context().get('directory', os.getcwd()))
+            return self.live.read()
         marker = ui_symbol('›', '>')
         prompt = ' {}{}{}{} '.format(BOLD, COLOR_LYRA, marker, RESET)
         self.branch = workspace_branch(self.context().get('directory', os.getcwd()))
@@ -785,7 +847,18 @@ class TerminalInput:
 NOT_INTERACTIVE = object()   # returned by choose() when there is no real terminal to draw a menu on
 
 
+TERMINAL_RUNNER = None   # set by the live console: runs blocking terminal code with the live area suspended
+
+
 def choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False):
+    """Arrow-key menu (see _choose). Inside the live console the live area is suspended while it shows."""
+    runner = TERMINAL_RUNNER
+    if runner is not None and input_stream is None and output_stream is None and not force:
+        return runner(lambda: _choose(title, options, selected, subtitle))
+    return _choose(title, options, selected, subtitle, input_stream, output_stream, force)
+
+
+def _choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False):
     """Arrow-key menu. `options` is a list of (label, description).
 
     Returns the chosen index, None when cancelled (Esc, q, Ctrl+C), or NOT_INTERACTIVE when stdin or
