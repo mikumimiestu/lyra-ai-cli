@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.9.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.9.1 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -23,6 +23,11 @@
   Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
   ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Baru di v2.9.1 — Menu dengan tombol panah
+
+- `/model`, `/reasoning`, `/memory`, `/reminder`, dan `/project` kini berupa menu: gerakkan dengan **↑ ↓** (atau `j` / `k`), konfirmasi dengan **Enter**, tekan **angka** untuk langsung memilih, dan **Esc** (atau `q`) untuk membatalkan. Menu mulai dari pilihan yang sedang dipakai.
+- Di terminal tanpa mode interaktif (pipe, `TERM=dumb`, atau `prompt_toolkit` belum terpasang), menu otomatis kembali ke input angka seperti sebelumnya.
 
 ### Baru di v2.9.0 — Tampilan ala Claude Code dan mode persetujuan
 

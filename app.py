@@ -25,7 +25,7 @@ from styling import (
 from spinner import Spinner, EscapeWatcher
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
-                     USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width)
+                     USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -209,60 +209,73 @@ def render_model_selector(current_idx):
     bot_b = "─" * w
     print(f"  {B}╰{bot_b}╯{R}")
 
+def pick_option(title, options, selected=0, subtitle=""):
+    """Arrow-key menu; without a terminal it falls back to numbered input.
+
+    Returns the 0-based index, or None when cancelled or the typed number is invalid.
+    """
+    picked = choose(title, options, selected, subtitle)
+    if picked is not NOT_INTERACTIVE:
+        return picked
+    print(f"\n  {BOLD}{COLOR_LYRA}{ui_symbol('✦', '*')} {title}{RESET}\n")
+    for number, (label, description) in enumerate(options, 1):
+        print(f"  {number}. {BOLD}{label}{RESET}" + (f" {DIM}- {description}{RESET}" if description else ""))
+    try:
+        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-{len(options)}) ❯{RESET} ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+    return int(choice) - 1 if choice.isdigit() and 1 <= int(choice) <= len(options) else None
+
 def handle_reasoning_command(config):
     """Pilih tingkat penalaran (cepat / sedang)."""
     current_effort = config.get("reasoning_effort", "medium")
-    print(f"\n  {BOLD}{COLOR_LYRA}✦ Pilih Tingkat Penalaran (Reasoning Effort){RESET}\n")
-    print(f"  1. {BOLD}Cepat (Low effort){RESET}   {DIM}- Penalaran singkat, waktu respon super cepat{RESET}")
-    print(f"  2. {BOLD}Sedang (Medium effort){RESET} {DIM}- Penalaran mendalam seimbang{RESET}")
-    try:
-        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-2) ❯{RESET} ").strip()
-        if choice == "1":
-            config["reasoning_effort"] = "low"
-            save_config(config)
-            print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tingkat penalaran: {BOLD}Cepat (Low effort){RESET} {COLOR_DIM}(disimpan sebagai default){RESET}\n")
-            return "low"
-        elif choice == "2":
-            config["reasoning_effort"] = "medium"
-            save_config(config)
-            print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tingkat penalaran: {BOLD}Sedang (Medium effort){RESET} {COLOR_DIM}(disimpan sebagai default){RESET}\n")
-            return "medium"
-        else:
-            print(f"  {DIM}Tingkat penalaran tidak diubah.{RESET}\n")
-            return current_effort
-    except (EOFError, KeyboardInterrupt):
-        print(f"  {DIM}Dibatalkan.{RESET}\n")
+    picked = pick_option(
+        "Pilih Tingkat Penalaran",
+        [(e["name"], e["desc"]) for e in REASONING_EFFORTS],
+        selected=next((i for i, e in enumerate(REASONING_EFFORTS) if e["id"] == current_effort), 1),
+        subtitle="Tersimpan sebagai default untuk sesi berikutnya.")
+    if picked is None:
+        print(f"  {DIM}Tingkat penalaran tidak diubah.{RESET}\n")
         return current_effort
+    effort = REASONING_EFFORTS[picked]
+    config["reasoning_effort"] = effort["id"]
+    save_config(config)
+    print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tingkat penalaran: {BOLD}{effort['name']}{RESET} {COLOR_DIM}(disimpan sebagai default){RESET}\n")
+    return effort["id"]
 
 def handle_model_command(config):
     """Interaktif model selector & reasoning selector."""
     current_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
-    if current_idx >= len(MODELS):
+    if not isinstance(current_idx, int) or not 0 <= current_idx < len(MODELS):
         current_idx = DEFAULT_MODEL_INDEX
-    render_model_selector(current_idx)
-    try:
-        choice = input(f"\n  {BOLD}{COLOR_USER}Nomor model ❯{RESET} ").strip()
-        if choice == "":
-            print(f"  {DIM}Model tidak diubah.{RESET}\n")
+    options = [(m["name"], ("reasoning" if m["supports_reasoning"] else "tanpa reasoning")
+                + ("   ✓ dipakai" if i == current_idx else "")) for i, m in enumerate(MODELS)]
+    idx = choose("Pilih Model AI", options, current_idx, "Ganti model AI untuk sesi ini dan simpan di preferensi.")
+    if idx is NOT_INTERACTIVE:
+        render_model_selector(current_idx)
+        try:
+            choice = input(f"\n  {BOLD}{COLOR_USER}Nomor model ❯{RESET} ").strip()
+            idx = int(choice) - 1 if choice else None
+        except (ValueError, EOFError):
+            print(f"  {RED}Input tidak valid.{RESET}\n")
             return current_idx
-        idx = int(choice) - 1
-        if 0 <= idx < len(MODELS):
-            config["model_index"] = idx
-            m = MODELS[idx]
-            print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Model: {BOLD}{COLOR_LYRA}{m['name']}{RESET} {COLOR_DIM}(disimpan sebagai default){RESET}")
-            if m.get("supports_reasoning"):
-                handle_reasoning_command(config)
-            else:
-                config["reasoning_effort"] = "low"
-            save_config(config)
-            print()
-            return idx
-        else:
+        if idx is not None and not 0 <= idx < len(MODELS):
             print(f"  {RED}Nomor tidak valid.{RESET}\n")
             return current_idx
-    except (ValueError, EOFError):
-        print(f"  {RED}Input tidak valid.{RESET}\n")
+    if idx is None:
+        print(f"  {DIM}Model tidak diubah.{RESET}\n")
         return current_idx
+    config["model_index"] = idx
+    m = MODELS[idx]
+    print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Model: {BOLD}{COLOR_LYRA}{m['name']}{RESET} {COLOR_DIM}(disimpan sebagai default){RESET}")
+    if m.get("supports_reasoning"):
+        handle_reasoning_command(config)
+    else:
+        config["reasoning_effort"] = "low"
+    save_config(config)
+    print()
+    return idx
 
 def handle_update_command(interactive=True):
     """Interaktif cek & perbarui Lyra CLI ke versi terbaru dari GitHub."""
@@ -319,18 +332,15 @@ def handle_memory_command():
     current_mem = read_memory()
     print(f"  {DIM}--- Isi Memori Saat Ini ---{RESET}")
     print(current_mem.strip() if current_mem.strip() else f"  {DIM}(Memori masih kosong){RESET}")
-    print(f"  {DIM}---------------------------{RESET}\n")
-    print(f"  1. {BOLD}Tambah Catatan Baru{RESET}")
-    print(f"  2. {BOLD}Reset / Bersihkan Memori{RESET}")
-    print(f"  3. {BOLD}Kembali{RESET}")
+    print(f"  {DIM}---------------------------{RESET}")
+    picked = pick_option("Kelola memori", [("Tambah catatan baru", ""), ("Reset / bersihkan memori", ""), ("Kembali", "")])
     try:
-        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-3) ❯{RESET} ").strip()
-        if choice == "1":
+        if picked == 0:
             note = input(f"  {BOLD}{COLOR_USER}Catatan/Fakta baru ❯{RESET} ").strip()
             if note:
                 res = save_memory(note)
                 print(f"  {GREEN}{res}{RESET}\n")
-        elif choice == "2":
+        elif picked == 1:
             confirm = input(f"  {RED}Yakin ingin menghapus seluruh isi memori? (y/n) ❯{RESET} ").strip().lower()
             if confirm == 'y':
                 res = clear_memory()
@@ -348,27 +358,23 @@ def handle_reminder_command():
     print(f"\n  {BOLD}{COLOR_LYRA}🔔 Pengingat & Notifikasi Laptop Amagi AI{RESET}")
     daemon_st = f"{GREEN}Aktif (Background Running){RESET}" if is_daemon_running() else f"{YELLOW}Mati (akan menyala otomatis){RESET}"
     print(f"  {DIM}Status Daemon Background: {daemon_st}{RESET}\n")
-    
+
     print(tool_list_reminders())
-    print()
-    print(f"  1. {BOLD}Buat Pengingat Baru{RESET}")
-    print(f"  2. {BOLD}Batalkan Pengingat{RESET}")
-    print(f"  3. {BOLD}Pastikan Daemon Background Aktif{RESET}")
-    print(f"  4. {BOLD}Kembali{RESET}")
+    picked = pick_option("Kelola pengingat", [("Buat pengingat baru", ""), ("Batalkan pengingat", ""),
+                                              ("Pastikan daemon background aktif", ""), ("Kembali", "")])
     try:
-        choice = input(f"\n  {BOLD}{COLOR_USER}Pilihan (1-4) ❯{RESET} ").strip()
-        if choice == "1":
+        if picked == 0:
             msg = input(f"  {BOLD}{COLOR_USER}Pesan pengingat ❯{RESET} ").strip()
             waktu = input(f"  {BOLD}{COLOR_USER}Waktu (cth: '10m', '1h', '14:30', '30s') ❯{RESET} ").strip()
             if msg and waktu:
                 res = tool_set_reminder(message=msg, time_input=waktu)
                 print(f"\n  {res}\n")
-        elif choice == "2":
+        elif picked == 1:
             rem_id = input(f"  {BOLD}{COLOR_USER}ID Pengingat yang ingin dibatalkan (cth: rem_123) ❯{RESET} ").strip()
             if rem_id:
                 res = tool_cancel_reminder(rem_id)
                 print(f"  {res}\n")
-        elif choice == "3":
+        elif picked == 2:
             ensure_daemon_running()
             print(f"  {GREEN}✓ Daemon pengingat latar belakang telah diaktifkan!{RESET}\n")
     except (EOFError, KeyboardInterrupt):
@@ -629,12 +635,26 @@ def handle_todos_command(todo_list):
         print(line)
     print()
 
+PROJECT_TYPES = [
+    ("react", "React"), ("next", "Next.js"), ("vue", "Vue"), ("laravel", "Laravel (PHP)"), ("php", "PHP polos"),
+    ("express", "Express (Node.js)"), ("django", "Django (Python)"), ("fastapi", "FastAPI (Python)"),
+    ("flutter", "Flutter"), ("node", "Node.js polos"),
+]
+
 def handle_project_command(cwd):
     """Wizard pembuatan project baru."""
-    print(f"\n  {BOLD}{COLOR_LYRA}✦ Buat Project Baru{RESET}\n")
-    print(f"  {DIM}Tipe yang didukung: react, next, vue, laravel, php, express, django, fastapi, flutter, node{RESET}\n")
+    print(f"\n  {BOLD}{COLOR_LYRA}✦ Buat Project Baru{RESET}")
     try:
-        ptype  = input(f"  {BOLD}{COLOR_USER}Tipe project ❯{RESET} ").strip().lower()
+        picked = choose("Pilih tipe project", PROJECT_TYPES, 0, "Nama dan folder tujuan ditanyakan setelah ini.")
+        if picked is NOT_INTERACTIVE:
+            print(f"\n  {DIM}Tipe yang didukung: {', '.join(name for name, _ in PROJECT_TYPES)}{RESET}\n")
+            ptype = input(f"  {BOLD}{COLOR_USER}Tipe project ❯{RESET} ").strip().lower()
+        elif picked is None:
+            print(f"  {DIM}Dibatalkan.{RESET}\n")
+            return
+        else:
+            ptype = PROJECT_TYPES[picked][0]
+            print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tipe: {BOLD}{PROJECT_TYPES[picked][1]}{RESET}\n")
         pname  = input(f"  {BOLD}{COLOR_USER}Nama project ❯{RESET} ").strip()
         pdir_input = input(f"  {BOLD}{COLOR_USER}Direktori tujuan (kosong = cwd) ❯{RESET} ").strip()
         target = pdir_input if pdir_input else cwd

@@ -782,6 +782,79 @@ class TerminalInput:
         return self.session.prompt(ANSI(prompt))
 
 
+NOT_INTERACTIVE = object()   # returned by choose() when there is no real terminal to draw a menu on
+
+
+def choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False):
+    """Arrow-key menu. `options` is a list of (label, description).
+
+    Returns the chosen index, None when cancelled (Esc, q, Ctrl+C), or NOT_INTERACTIVE when stdin or
+    stdout is not a terminal (or prompt_toolkit is missing) so the caller can fall back to typed input.
+    """
+    interactive = EDITOR_AVAILABLE and (force or (sys.stdin.isatty() and sys.stdout.isatty()
+                                                  and os.environ.get('TERM') != 'dumb'))
+    if not interactive or not options:
+        return NOT_INTERACTIVE
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.layout import Layout
+    from prompt_toolkit.layout.controls import FormattedTextControl
+
+    count = len(options)
+    state = {'index': max(0, min(int(selected), count - 1))}
+
+    def render():
+        room = max(20, get_terminal_width() - 4)
+        rows = [f'  {BOLD}{COLOR_LYRA}{title}{RESET}']
+        if subtitle:
+            rows.append(f'  {COLOR_DIM}{fit_console_text(subtitle, room)}{RESET}')
+        rows.append('')
+        label_w = max(str_width(label) for label, _ in options)
+        for number, (label, description) in enumerate(options):
+            active = number == state['index']
+            pointer = f'{BOLD}{COLOR_LYRA}{ui_symbol("❯", ">")}{RESET}' if active else ' '
+            name = f'{BOLD}{label}{RESET}' if active else label
+            gap = ' ' * (label_w - str_width(label) + 2)
+            detail = f'{gap}{COLOR_DIM}{fit_console_text(description, max(4, room - label_w - 10))}{RESET}' if description else ''
+            rows.append(f'  {pointer} {number + 1}. {name}{detail}')
+        rows.append('')
+        arrows = ui_symbol('↑↓', 'Atas/Bawah')
+        rows.append(f'  {COLOR_DIM}{arrows} pilih {ui_symbol("·", "-")} Enter konfirmasi {ui_symbol("·", "-")} angka langsung {ui_symbol("·", "-")} Esc batal{RESET}')
+        return ANSI('\n'.join(rows))
+
+    bindings = KeyBindings()
+
+    @bindings.add('up')
+    @bindings.add('k')
+    def move_up(event):
+        state['index'] = (state['index'] - 1) % count
+
+    @bindings.add('down')
+    @bindings.add('j')
+    def move_down(event):
+        state['index'] = (state['index'] + 1) % count
+
+    @bindings.add('enter')
+    def confirm(event):
+        event.app.exit(result=state['index'])
+
+    @bindings.add('escape', eager=True)
+    @bindings.add('q')
+    @bindings.add('c-c')
+    @bindings.add('c-d')
+    def cancel(event):
+        event.app.exit(result=None)
+
+    for digit in range(1, min(count, 9) + 1):
+        @bindings.add(str(digit))
+        def pick(event, digit=digit):
+            event.app.exit(result=digit - 1)
+
+    application = Application(layout=Layout(Window(FormattedTextControl(render), dont_extend_height=True)),
+                              key_bindings=bindings, full_screen=False, erase_when_done=True,
+                              input=input_stream, output=output_stream)
+    return application.run()
+
+
 BAND_BG = rgb_bg(48, 48, 54) if IS_DARK else rgb_bg(228, 228, 234)
 
 

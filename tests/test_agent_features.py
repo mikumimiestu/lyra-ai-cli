@@ -521,5 +521,100 @@ class ApprovalModeTests(unittest.TestCase):
         self.assertTrue(all('approval' not in config and 'mode' not in config for config in saved))
 
 
+class ArrowMenuTests(unittest.TestCase):
+    OPTIONS = [('Satu', 'a'), ('Dua', 'b'), ('Tiga', 'c')]
+
+    def run_menu(self, keys, selected=0):
+        from prompt_toolkit.input import create_pipe_input
+        from prompt_toolkit.output import DummyOutput
+        with create_pipe_input() as pipe:
+            pipe.send_text(keys)
+            return styling.choose('Judul', self.OPTIONS, selected, input_stream=pipe, output_stream=DummyOutput(), force=True)
+
+    def test_arrows_move_and_enter_confirms(self):
+        self.assertEqual(self.run_menu('\r'), 0)
+        self.assertEqual(self.run_menu('\x1b[B\r'), 1)
+        self.assertEqual(self.run_menu('\x1b[B\x1b[B\r'), 2)
+        self.assertEqual(self.run_menu('\x1b[A\r'), 2)           # wraps upwards
+        self.assertEqual(self.run_menu('\x1b[B\x1b[B\x1b[B\r'), 0)   # wraps downwards
+        self.assertEqual(self.run_menu('jj\r'), 2)
+        self.assertEqual(self.run_menu('k\r', selected=1), 0)
+
+    def test_number_selects_immediately_and_start_position_is_kept(self):
+        self.assertEqual(self.run_menu('3'), 2)
+        self.assertEqual(self.run_menu('\r', selected=2), 2)
+        self.assertEqual(self.run_menu('\r', selected=99), 2)
+
+    def test_cancel_keys_return_none(self):
+        for key in ('q', '\x03', '\x04'):
+            self.assertIsNone(self.run_menu(key), repr(key))
+
+    def test_without_a_terminal_the_menu_steps_aside(self):
+        self.assertIs(styling.choose('x', self.OPTIONS), styling.NOT_INTERACTIVE)
+        self.assertIs(styling.choose('x', []), styling.NOT_INTERACTIVE)
+
+    def test_model_menu_saves_choice_and_shows_current(self):
+        seen = {}
+        def fake(title, options, selected, subtitle=''):
+            seen.update(title=title, options=options, selected=selected)
+            return 1
+        saved = []
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', side_effect=fake), \
+             patch.object(app, 'save_config', side_effect=lambda config: saved.append(dict(config))):
+            config = {'model_index': 3}
+            result = app.handle_model_command(config)
+        self.assertEqual(result, 1)
+        self.assertEqual(seen['selected'], 3)
+        self.assertEqual([name for name, _ in seen['options']], [m['name'] for m in app.MODELS])
+        self.assertIn('✓ dipakai', seen['options'][3][1])
+        self.assertEqual(saved[-1]['model_index'], 1)
+
+    def test_cancelling_a_menu_changes_nothing(self):
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=None), \
+             patch.object(app, 'save_config') as save:
+            self.assertEqual(app.handle_model_command({'model_index': 2}), 2)
+            self.assertEqual(app.handle_reasoning_command({'reasoning_effort': 'low'}), 'low')
+        save.assert_not_called()
+
+    def test_reasoning_menu_preselects_current_effort_and_saves(self):
+        calls = []
+        def fake(title, options, selected, subtitle=''):
+            calls.append(selected)
+            return 0
+        config = {'reasoning_effort': 'medium'}
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', side_effect=fake), patch.object(app, 'save_config'):
+            self.assertEqual(app.handle_reasoning_command(config), 'low')
+        self.assertEqual(calls, [1])
+        self.assertEqual(config['reasoning_effort'], 'low')
+
+    def test_typed_fallback_still_works_without_a_terminal(self):
+        with contextlib.redirect_stdout(io.StringIO()), patch('builtins.input', return_value='1'), patch.object(app, 'save_config'):
+            self.assertEqual(app.handle_reasoning_command({}), 'low')
+        with contextlib.redirect_stdout(io.StringIO()), patch('builtins.input', return_value='9'), patch.object(app, 'save_config') as save:
+            self.assertEqual(app.handle_reasoning_command({'reasoning_effort': 'medium'}), 'medium')
+        save.assert_not_called()
+        with contextlib.redirect_stdout(io.StringIO()), patch('builtins.input', side_effect=['3']), \
+             patch.object(app, 'save_config'), patch.object(app, 'handle_reasoning_command'):
+            self.assertEqual(app.handle_model_command({'model_index': 0}), 2)
+
+    def test_project_menu_picks_type_then_asks_name_and_folder(self):
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=6), \
+             patch('builtins.input', side_effect=['demo', '']), patch.object(app, 'init_project', return_value='ok') as init:
+            app.handle_project_command('/work')
+        init.assert_called_once_with('django', 'demo', target_dir='/work')
+
+    def test_memory_and_reminder_menus_use_the_same_picker(self):
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=0), \
+             patch.object(app, 'read_memory', return_value=''), patch('builtins.input', return_value='catatan'), \
+             patch.object(app, 'save_memory', return_value='tersimpan') as save:
+            app.handle_memory_command()
+        save.assert_called_once_with('catatan')
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=2), \
+             patch.object(app, 'is_daemon_running', return_value=False), patch.object(app, 'tool_list_reminders', return_value='-'), \
+             patch.object(app, 'ensure_daemon_running') as ensure:
+            app.handle_reminder_command()
+        ensure.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
