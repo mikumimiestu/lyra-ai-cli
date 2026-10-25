@@ -979,6 +979,18 @@ def tool_activity(name, arguments):
 
 
 # ─── Console capabilities and file context ───────────────────────────────────
+def clear_terminal():
+    """Wipe the visible screen so the shell looks fresh again. Does nothing (returns False) off a terminal."""
+    try:
+        if not (sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'):
+            return False
+        sys.stdout.write('\033[2J\033[H')
+        sys.stdout.flush()
+        return True
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 def unicode_terminal():
     if os.environ.get('LYRA_ASCII', '').lower() in ('1', 'true', 'yes') or os.environ.get('TERM') == 'dumb':
         return False

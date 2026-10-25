@@ -90,6 +90,7 @@ class LiveState:
         self.response = None
         self.real_stdout = None
         self.real_input = None
+        self.exit_message = None     # shown after the UI is gone, once the screen is wiped
         self._status = None
         self._saved_runner = None
         self._ui_thread = None
@@ -287,6 +288,11 @@ def run_live(target):
         finally:
             live.detach()
     thread.join(timeout=3)
+    if live.exit_message is not None and not failure:
+        from styling import clear_terminal
+        clear_terminal()
+        sys.stdout.write(live.exit_message)
+        sys.stdout.flush()
     if failure:
         sys.stderr.write(failure[0])
 

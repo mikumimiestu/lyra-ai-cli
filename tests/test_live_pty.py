@@ -85,6 +85,23 @@ class LivePtyTests(unittest.TestCase):
         self.assertTrue(run.wait_for('PROCESS-ENDED', 6, where=lambda: run.raw), run.screen.text())
         self.assertIsNone(self.composer_row(run))             # the composer was erased on exit
 
+    def test_typing_exit_leaves_a_clean_screen_with_one_goodbye_line(self):
+        for env in (None, {'LYRA_CLASSIC': '1'}):
+            with self.subTest(mode='classic' if env else 'live'):
+                run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env=env)
+                self.addCleanup(run.close)
+                self.assertTrue(run.wait_for('tanya dulu', 10))
+                run.send('halo\r')
+                self.assertTrue(run.wait_for('Halo! Ini', 8))
+                self.assertTrue(run.wait_for('Selesai', 4))
+                run.pump(1.0)                                # let the prompt come back before typing
+                run.send('exit\r')
+                self.assertTrue(run.wait_for('PROCESS-ENDED', 6, where=lambda: run.raw), run.screen.text())
+                text = run.screen.text()
+                self.assertIn('Selamat tinggal', text)
+                for leftover in ('Halo! Ini', '██╗', '› halo', 'tanya dulu'):
+                    self.assertNotIn(leftover, text)
+
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})
         self.addCleanup(run.close)

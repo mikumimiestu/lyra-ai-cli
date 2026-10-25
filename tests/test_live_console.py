@@ -140,5 +140,35 @@ class LiveIntegrationTests(unittest.TestCase):
         self.assertEqual(events, ['shutdown', 'exec'])
 
 
+class CleanExitTests(unittest.TestCase):
+    def test_clear_terminal_only_acts_on_a_real_terminal(self):
+        pipe = io.StringIO()
+        with contextlib.redirect_stdout(pipe):
+            self.assertFalse(styling.clear_terminal())
+        self.assertEqual(pipe.getvalue(), '')
+        tty = io.StringIO()
+        tty.isatty = lambda: True
+        with contextlib.redirect_stdout(tty), patch.dict(os.environ, {'TERM': 'xterm-256color'}):
+            self.assertTrue(styling.clear_terminal())
+        self.assertEqual(tty.getvalue(), '\033[2J\033[H')
+        with contextlib.redirect_stdout(tty), patch.dict(os.environ, {'TERM': 'dumb'}):
+            self.assertFalse(styling.clear_terminal())
+
+    def test_classic_exit_wipes_the_screen_then_says_goodbye(self):
+        order = []
+        with patch.object(app, 'clear_terminal', side_effect=lambda: order.append('clear')), \
+             patch('builtins.print', side_effect=lambda *a, **k: order.append(a[0])):
+            app.end_session(None, 'sampai jumpa')
+        self.assertEqual(order, ['clear', 'sampai jumpa'])
+
+    def test_live_exit_defers_the_goodbye_until_the_ui_is_gone(self):
+        live = sp.LiveState()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            app.end_session(live, 'sampai jumpa')
+        self.assertEqual(live.exit_message, 'sampai jumpa')
+        self.assertEqual(output.getvalue(), '')
+
+
 if __name__ == '__main__':
     unittest.main()

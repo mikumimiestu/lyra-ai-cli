@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.10.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.10.1 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -23,6 +23,11 @@
   Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
   ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Baru di v2.10.1 — Keluar dengan layar bersih
+
+- Ketik `exit` atau `quit` (atau tekan Ctrl+D pada input kosong): layar terminal dibersihkan, lalu muncul satu baris pamit. Percakapan tidak tertinggal di layar.
+- Hanya layar yang terlihat yang dibersihkan. Riwayat scrollback terminal tidak dihapus, dan di luar terminal interaktif (pipe, `TERM=dumb`) tidak ada yang dibersihkan.
 
 ### Baru di v2.10.0 — Input tetap di bawah, seperti Claude Code
 

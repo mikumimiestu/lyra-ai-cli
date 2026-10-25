@@ -26,7 +26,8 @@ from styling import (
 from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported, run_live
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
-                     USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE)
+                     USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE,
+                     clear_terminal)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -703,6 +704,14 @@ def main():
     else:
         _run_session(None)
 
+def end_session(live, message):
+    """Leave with a clean screen: wipe the conversation, then say goodbye in one line."""
+    if live is not None:
+        live.exit_message = message          # printed by run_live once the live UI has released the terminal
+        return
+    clear_terminal()
+    print(message)
+
 def _run_session(live=None):
     config  = load_config()
     if migrate_model_config(config):
@@ -776,7 +785,7 @@ def _run_session(live=None):
                 print(f"\n  {COLOR_DIM}Input dibatalkan.{RESET}\n")
                 continue
             except EOFError:
-                print(f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
+                end_session(live, f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
                 break
 
             if not user_input:
@@ -791,7 +800,7 @@ def _run_session(live=None):
 
             # ── Built-in Slash Commands ───────────────────────────────────────
             if user_input.lower() in ("exit", "quit"):
-                print(f"\n  {GREEN}Selamat tinggal! Terima kasih menggunakan Lyra CLI.{RESET}\n")
+                end_session(live, f"\n  {GREEN}Selamat tinggal! Terima kasih menggunakan Lyra CLI.{RESET}\n")
                 break
 
             elif user_input.lower() in ("/", "/help"):
@@ -1028,7 +1037,7 @@ def _run_session(live=None):
             print(f"\n  {COLOR_DIM}Proses dibatalkan. Kamu bisa lanjut mengetik.{RESET}\n")
             continue
         except EOFError:
-            print(f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
+            end_session(live, f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")
             break
         except Exception as e:
             print(f"\n  {RED}Kesalahan sistem: {e}{RESET}\n")
