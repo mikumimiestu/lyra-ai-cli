@@ -1,20 +1,42 @@
 """One-line terminal progress with a real elapsed clock and safe cleanup."""
 import os
+import random
 import signal
 import sys
 import threading
 import time
 import _thread
-from styling import (COLOR_DIM, COLOR_LYRA, RESET, fit_console_text, get_gradient_color,
+from styling import (COLOR_DIM, ui_symbol, COLOR_LYRA, RESET, fit_console_text, get_gradient_color,
                      get_terminal_width, rgb_to_ansi, unicode_terminal)
+
+
+TIPS = [
+    'ketik @ untuk menyertakan file ke pesan',
+    'tekan Esc untuk menghentikan jawaban',
+    '/status merangkum sesi dan perkiraan konteks',
+    'Alt+Enter atau Ctrl+J menambah baris baru',
+    '/todos menampilkan daftar tugas yang sedang berjalan',
+    '/details membuka detail aktivitas terakhir',
+    '/reasoning mengatur tingkat penalaran',
+    '/clear mengosongkan percakapan dan konteks',
+]
+
+
+def format_tokens(chars):
+    """Rough token count (about four characters each) for the status line, e.g. 1,1k."""
+    count = int(chars // 4)
+    return str(count) if count < 1000 else f'{count / 1000:.1f}k'.replace('.', ',')
 
 
 class Spinner:
     FRAMES = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢']
     ASCII_FRAMES = ['|', '/', '-', '\\']
 
-    def __init__(self, message='Memproses permintaan...'):
+    def __init__(self, message='Memproses permintaan...', tip=False):
         self.message = message
+        self.tip = tip
+        self.chars = 0
+        self._tip_start = random.randrange(len(TIPS))
         self.stop_event = threading.Event()
         self.thread = None
         self._lock = threading.Lock()
@@ -35,9 +57,10 @@ class Spinner:
         width = max(1, get_terminal_width() - 1)
         seconds = f'{self.elapsed:.0f}s'
         prefix = f'  {frame} '
-        full = f' ({seconds} {"·" if unicode else "/"} Esc batal)'
-        short = f' ({seconds})'
-        suffix = full if width - len(prefix) - len(full) >= 16 else short
+        sep = ' · ' if unicode else ' / '
+        counted = [seconds] + ([f'{"↓" if unicode else "v"} {format_tokens(self.chars)} token'] if self.chars >= 4 else [])
+        options = [' (' + sep.join(counted + ['Esc batal']) + ')', ' (' + sep.join(counted) + ')', f' ({seconds})']
+        suffix = next((option for option in options if width - len(prefix) - len(option) >= 16), options[-1])
         message = fit_console_text(self.message, max(1, width - len(prefix) - len(suffix)))
         # The glyph breathes through the Lyra gradient; the clock stays quiet.
         phase = abs(((self._i % 30) / 15.0) - 1.0)
@@ -45,10 +68,24 @@ class Spinner:
         return fit_console_text(f'{prefix}{message}{suffix}', width) if not color else \
             f'{color}{prefix}{message}{RESET}{COLOR_DIM}{suffix}{RESET}'
 
+    def add_tokens(self, chars):
+        """Count streamed characters (reasoning included) for the live token estimate."""
+        self.chars += chars
+
+    def _tip_line(self):
+        width = max(1, get_terminal_width() - 1)
+        tip = TIPS[(self._tip_start + int(self.elapsed // 10)) % len(TIPS)]
+        text = f'  {ui_symbol("⎿", "L")}  Tips: {tip}'
+        return f'{COLOR_DIM}{fit_console_text(text, width)}{RESET}'
+
     def _render(self):
         with self._lock:
             if self._active:
-                self._output.write('\r\033[2K' + self._line())
+                text = '\r\033[2K' + self._line()
+                if self.tip:
+                    # Second line holds a rotating tip; the cursor returns to the status line.
+                    text += '\n\033[2K' + self._tip_line() + '\033[1A\r'
+                self._output.write(text)
                 self._output.flush()
                 self._i += 1
 
@@ -91,7 +128,7 @@ class Spinner:
         with self._lock:
             self._active = False
             if self._animated:
-                self._output.write('\r\033[2K')
+                self._output.write('\r\033[2K' + ('\033[1B\033[2K\033[1A\r' if self.tip else ''))
                 self._output.flush()
         self.thread = None
 

@@ -9,6 +9,7 @@ if _current_dir not in sys.path:
 import requests
 import json
 import re
+import subprocess
 import threading
 
 # ─── Import custom modules ────────────────────────────────────────────────────
@@ -24,12 +25,13 @@ from styling import (
 from spinner import Spinner, EscapeWatcher
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
-                     USE_COLOR, workspace_branch)
+                     USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
     get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
-    tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList
+    tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList,
+    APPROVAL, APPROVAL_LABELS
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
@@ -218,12 +220,12 @@ def handle_reasoning_command(config):
         if choice == "1":
             config["reasoning_effort"] = "low"
             save_config(config)
-            print(f"  {GREEN}✓ Tingkat penalaran diubah ke: Cepat (Low effort){RESET}\n")
+            print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tingkat penalaran: {BOLD}Cepat (Low effort){RESET} {COLOR_DIM}(disimpan sebagai default){RESET}\n")
             return "low"
         elif choice == "2":
             config["reasoning_effort"] = "medium"
             save_config(config)
-            print(f"  {GREEN}✓ Tingkat penalaran diubah ke: Sedang (Medium effort){RESET}\n")
+            print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Tingkat penalaran: {BOLD}Sedang (Medium effort){RESET} {COLOR_DIM}(disimpan sebagai default){RESET}\n")
             return "medium"
         else:
             print(f"  {DIM}Tingkat penalaran tidak diubah.{RESET}\n")
@@ -247,7 +249,7 @@ def handle_model_command(config):
         if 0 <= idx < len(MODELS):
             config["model_index"] = idx
             m = MODELS[idx]
-            print(f"\n  {GREEN}✓{RESET} Model diubah ke {BOLD}{COLOR_LYRA}{m['name']}{RESET}")
+            print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Model: {BOLD}{COLOR_LYRA}{m['name']}{RESET} {COLOR_DIM}(disimpan sebagai default){RESET}")
             if m.get("supports_reasoning"):
                 handle_reasoning_command(config)
             else:
@@ -296,9 +298,20 @@ def handle_update_command(interactive=True):
 
     if success:
         print(f"  {GREEN}✓ {msg}{RESET}")
-        print(f"  {BOLD}{COLOR_ACCENT}✦ Lyra CLI berhasil diperbarui ke v{latest_version}! Silakan jalankan ulang 'amagi'.{RESET}\n")
-    else:
-        print(f"  {RED}✖ Gagal memperbarui: {msg}{RESET}\n")
+        print(f"  {BOLD}{COLOR_ACCENT}✦ Lyra CLI berhasil diperbarui ke v{latest_version}! Ketik /restart untuk memakai versi baru.{RESET}\n")
+        return True
+    print(f"  {RED}✖ Gagal memperbarui: {msg}{RESET}\n")
+    return False
+
+def restart_application():
+    """Replace this process with a fresh one so an update takes effect without retyping `amagi`."""
+    sys.stdout.flush()
+    try:
+        if os.name == "nt":
+            sys.exit(subprocess.call([sys.executable] + sys.argv))
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except OSError as error:
+        print(f"  {RED}Gagal memulai ulang: {error}. Jalankan 'amagi' lagi secara manual.{RESET}\n")
 
 def handle_memory_command():
     """Interaktif pengelola memori Amagi AI."""
@@ -431,7 +444,7 @@ class VisibleResponseFilter:
 
 
 def stream_ai_response(headers, data, model_info=None):
-    spinner = Spinner('Menunggu respons...')
+    spinner = Spinner('Menunggu respons...', tip=True)
     response = None
     chunks = []
     parser = VisibleResponseFilter()
@@ -477,6 +490,8 @@ def stream_ai_response(headers, data, model_info=None):
                     reasoning = delta.get('reasoning_content') or delta.get('reasoning')
                 except (ValueError, KeyError, IndexError, TypeError, AttributeError):
                     continue
+                if not visible_started:
+                    spinner.add_tokens(len(reasoning or '') + (len(content) if isinstance(content, str) else 0))
                 if reasoning and not visible_started:
                     spinner.set_message('Memproses permintaan...')
                 if not isinstance(content, str) or not content:
@@ -547,6 +562,7 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
         ("Endpoint", API_URL.split("/")[2]),
         ("Percakapan", f"{turns} pesan, ~{tokens:,} token ({context_percent(messages)}% dari {context_limit():,})"),
         ("Tugas", f"{done}/{len(todo_list.items)} selesai" if todo_list.items else "-"),
+        ("Persetujuan", APPROVAL_LABELS[APPROVAL.mode]),
         ("Memori", f"{len(read_memory().strip())} karakter"),
         ("Pengingat", "daemon aktif" if is_daemon_running() else "daemon mati"),
         ("Terminal", f"{get_terminal_width()} kolom, {'unicode' if unicode_terminal() else 'ASCII'}, {'warna' if USE_COLOR else 'tanpa warna'}"),
@@ -559,6 +575,49 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
     for line in render_box(body, width, title=f"{BOLD}{COLOR_LYRA}{ui_symbol('✦', '*')} Status{RESET}"):
         print("  " + line)
     print()
+
+MODE_ALIASES = {"ask": "ask", "tanya": "ask", "edit": "edits", "edits": "edits", "all": "all", "semua": "all"}
+
+def render_auto_all_warning():
+    width = box_width(78)
+    lines = []
+    for text in (
+        "Lyra menulis file dan menjalankan perintah terminal tanpa bertanya.",
+        "Perintah berbahaya (rm -rf, sudo, git push --force, curl | sh, dan sejenisnya) tetap meminta izin.",
+        "Kembali ke aman kapan saja dengan Shift+Tab atau /mode ask.",
+    ):
+        lines.extend(wrap_text_display_width(text, width - 4))
+    print()
+    for line in render_box(lines, width, color=RED, title=f"{BOLD}{RED}{ui_symbol('⚠', '!')} Mode AUTO SEMUA aktif{RESET}"):
+        print("  " + line)
+    print()
+
+def handle_mode_command(user_input):
+    """/mode [ask|edit|all]: choose how much Lyra may do without asking. Never saved between sessions."""
+    parts = user_input.split()
+    note = f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  "
+    if len(parts) == 1:
+        print(f"\n{note}Mode persetujuan: {BOLD}{APPROVAL_LABELS[APPROVAL.mode]}{RESET}")
+        print(f"     {COLOR_DIM}/mode ask · /mode edit (auto-setuju edit file) · /mode all (tanpa tanya) · Shift+Tab berganti{RESET}\n")
+        return
+    mode = MODE_ALIASES.get(parts[1].lower())
+    if mode is None:
+        print(f"  {RED}Mode tidak dikenal: {parts[1]}. Pilih ask, edit, atau all.{RESET}\n")
+        return
+    if mode == "all":
+        try:
+            answer = input(f"\n  {BOLD}{RED}Mode AUTO SEMUA menjalankan perintah dan menulis file tanpa bertanya. Aktifkan? (y/n) ❯{RESET} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer not in ("y", "ya", "yes"):
+            print(f"{note}Mode tidak diubah.\n")
+            return
+    APPROVAL.set(mode)
+    print(f"\n{note}Mode persetujuan: {BOLD}{APPROVAL_LABELS[mode]}{RESET} {COLOR_DIM}(hanya untuk sesi ini){RESET}")
+    if mode == "all":
+        render_auto_all_warning()
+    else:
+        print()
 
 def handle_todos_command(todo_list):
     print()
@@ -619,6 +678,7 @@ def main():
     active_cwd = os.getcwd()
     todo_list = TodoList()
     context_warned = False
+    warned_all = False
 
     # Pastikan daemon pengingat latar belakang berjalan
     ensure_daemon_running()
@@ -643,7 +703,8 @@ def main():
         "directory": active_cwd,
         "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
         "context_pct": context_percent(messages),
-    })
+        "approval": APPROVAL.mode,
+    }, on_cycle_mode=APPROVAL.cycle)
 
     activity = ActivityLog()
 
@@ -655,7 +716,7 @@ def main():
 
             if update_state["has_update"] and not update_state["notified"]:
                 update_state["notified"] = True
-                print(f"  {YELLOW}⚡ Versi terbaru (v{update_state['latest_version']}) tersedia! Ketik {BOLD}/update{RESET}{YELLOW} untuk memperbarui otomatis.{RESET}\n")
+                editor.notice = f"{ui_symbol('⚡', '!')} v{update_state['latest_version']} tersedia {ui_symbol('·', '/')} /update"
 
             try:
                 user_input = editor.read().strip()
@@ -668,6 +729,13 @@ def main():
 
             if not user_input:
                 continue
+            if getattr(editor, "session", None) is not None:
+                render_user_band(user_input)
+            if APPROVAL.mode == "all" and not warned_all:
+                warned_all = True
+                render_auto_all_warning()
+            elif APPROVAL.mode != "all":
+                warned_all = False
 
             # ── Built-in Slash Commands ───────────────────────────────────────
             if user_input.lower() in ("exit", "quit"):
@@ -676,6 +744,11 @@ def main():
 
             elif user_input.lower() in ("/", "/help"):
                 render_help()
+                continue
+
+            elif user_input.lower().split()[0] == "/mode":
+                handle_mode_command(user_input)
+                warned_all = APPROVAL.mode == "all"
                 continue
 
             elif user_input.lower() == "/status":
@@ -713,7 +786,12 @@ def main():
                 continue
 
             elif user_input.lower() in ("/update", "/check-update"):
-                handle_update_command(interactive=True)
+                if handle_update_command(interactive=True):
+                    editor.notice = f"{ui_symbol('✔', 'OK')} Update terpasang {ui_symbol('·', '/')} /restart"
+                continue
+
+            elif user_input.lower() == "/restart":
+                restart_application()
                 continue
 
             elif user_input.lower() in ("/version", "/v"):
@@ -822,6 +900,8 @@ def main():
                     break
 
                 text_before, tool_call_json = extract_tool_call(full_content)
+                if text_before.strip():
+                    activity.close_group()
                 messages.append({"role": "assistant", "content": full_content})
 
                 if tool_call_json:

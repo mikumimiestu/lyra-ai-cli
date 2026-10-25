@@ -3,18 +3,50 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.8.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.9.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
   ╰──────────────────────────────────────────────────────╯
   / perintah · @ file · Alt+Enter baris baru · /help
 
-  ╭──────────────────────────────────────────────────────╮
-  │ › jelaskan @app.py                                   │
-  ╰──────────────────────────────────────────────────────╯
-  Orpheus 6 · medium  |  ~/projects/amagi-cli / main
+   › jelaskan @app.py                                      ← pita abu penuh lebar
+
+  Membaca 1 file                                           ← langkah baca-saja dilipat jadi satu baris
+● app.py mengatur sesi, model, dan pemanggilan tool.
+
+✻ Selesai · 4s · 1 file dibaca · 00:22
+
+  ───────────────────────────────────────────────────────
+   ›
+  ───────────────────────────────────────────────────────
+  Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
+  ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Baru di v2.9.0 — Tampilan ala Claude Code dan mode persetujuan
+
+**Tampilan**
+
+- Pesan yang kamu kirim muncul sebagai pita abu penuh lebar. Composer berada di antara dua garis (bukan kotak), dan hilang setelah kirim.
+- Footer dua baris: model, reasoning, perkiraan konteks, direktori, branch; lalu mode persetujuan dan petunjuk tombol. Notifikasi update tampil rata kanan, menggantikan baris kuning lama.
+- `/update` lalu `/restart` memulai ulang Lyra dengan versi baru tanpa mengetik `amagi` lagi.
+- Status saat menunggu: `✢ Memproses permintaan... (23s · ↓ 1,1k token · Esc batal)` dengan baris tips yang berganti di bawahnya. Jumlah token adalah perkiraan dari panjang teks (sekitar 4 karakter per token).
+- Langkah tool yang hanya membaca (baca file, lihat folder, cek waktu atau memori) dilipat menjadi satu baris, misalnya `Membaca 3 file, melihat 2 folder`. Penulisan file dan perintah terminal tetap tampil lengkap. Detail penuh ada di `/details`.
+- Ringkasan akhir menampilkan jam: `✻ Selesai · 4s · 1 file dibaca · 00:22`. Perubahan lewat `/model` dan `/reasoning` dikonfirmasi dengan baris `⎿`.
+
+**Mode persetujuan** (Shift+Tab atau `/mode`)
+
+| Mode | Perilaku |
+| :--- | :--- |
+| `tanya dulu` (bawaan) | Setiap penulisan file dan perintah meminta izin, seperti sebelumnya. |
+| `auto-setuju edit file` (`/mode edit`) | Penulisan file dan pembuatan folder berjalan tanpa tanya, preview diff tetap tampil. Perintah terminal tetap meminta izin. |
+| `AUTO SEMUA` (`/mode all`) | File ditulis dan perintah dijalankan tanpa tanya. Footer berwarna merah tebal. |
+
+- Mode hanya berlaku untuk sesi berjalan, tidak pernah disimpan, dan setiap sesi baru dimulai dari `tanya dulu`.
+- `/mode all` meminta konfirmasi `y/n`, lalu menampilkan kotak peringatan merah. Peringatan muncul lagi pada pesan berikutnya bila mode dipindah lewat Shift+Tab.
+- Di mode `AUTO SEMUA`, perintah berbahaya **tetap meminta izin**: `rm -rf`, `sudo`, `git push --force`, `git reset --hard`, `git clean -f`, `curl ... | sh`, penulisan ke `/dev/sd*`, `chmod -R`, `shutdown`, `DROP TABLE`, `npm publish`, serta perintah yang menyentuh `~/.ssh` atau `.env`. Daftar ini adalah pengaman tambahan, bukan jaminan; gunakan mode ini hanya di folder yang kamu percaya.
+- Tindakan yang disetujui otomatis ditandai `✔ Disetujui otomatis (mode ...)` agar tetap terlihat di riwayat.
 
 ### Baru di v2.8.0 — Daftar model diperbarui
 
@@ -148,7 +180,9 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 
 | Perintah | Deskripsi |
 | :--- | :--- |
-| `/status` | Ringkasan sesi: versi, model, direktori, konteks, daemon |
+| `/status` | Ringkasan sesi: versi, model, direktori, konteks, persetujuan, daemon |
+| `/mode [ask\|edit\|all]` | Atur persetujuan otomatis (Shift+Tab juga berganti mode) |
+| `/restart` | Mulai ulang Lyra, misalnya setelah `/update` |
 | `/todos` | Lihat daftar tugas yang sedang dikerjakan Lyra |
 | `/model` | Buka pilihan model AI (Orpheus 6, Eurydice 6, Luma 4 mini, Luma 6.1, Luma Flash) |
 | `/reasoning` | Atur tingkat penalaran (`cepat` / `sedang`) |

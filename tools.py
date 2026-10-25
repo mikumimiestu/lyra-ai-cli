@@ -4,6 +4,7 @@ import subprocess
 import shlex
 import datetime
 import time
+import re
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
@@ -11,7 +12,7 @@ if _current_dir not in sys.path:
 
 from styling import (
     BOLD, RED, GREEN, YELLOW, COLOR_USER, COLOR_LYRA, COLOR_DIM, RESET, DIM, CYAN,
-    render_permission_box, render_diff_preview
+    render_permission_box, render_diff_preview, ui_symbol
 )
 from spinner import Spinner
 from memory import read_memory, save_memory, clear_memory
@@ -20,9 +21,70 @@ from reminder import add_reminder, list_reminders, cancel_reminder, ensure_daemo
 # ─── Timeout yang lebih lama untuk operasi berat ─────────────────────────────
 DEFAULT_TIMEOUT = 600   # 10 menit — cukup untuk npm/composer install besar
 
-def _confirm_permission(action_title, details):
-    """Meminta izin eksekusi pengguna dengan UI box yang elegan."""
+# ─── Approval modes ───────────────────────────────────────────────────────────
+from styling import APPROVAL_MODES
+
+APPROVAL_LABELS = {'ask': 'tanya dulu', 'edits': 'auto-setuju edit file', 'all': 'AUTO SEMUA'}
+
+# Commands that always ask, even in "auto semua": hard to undo or reaching outside the project.
+DANGEROUS_COMMAND_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in (
+    r'\brm\s+(?:-\S*[rf]\S*|--recursive|--force)\b',
+    r'\bsudo\b|\bdoas\b|\bsu\s+-',
+    r'\bmkfs\b|\bdd\s+if=|>\s*/dev/(?:sd|nvme|disk)',
+    r'\bchmod\s+-R\b|\bchown\s+-R\b',
+    r'\bgit\s+push\b.*(?:--force|\s-f\b)|\bgit\s+reset\s+--hard\b|\bgit\s+clean\s+-\S*f',
+    r'(?:curl|wget|iwr|irm)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b|\|\s*iex\b',
+    r'\bshutdown\b|\breboot\b|\bpoweroff\b|:\(\)\s*\{',
+    r'\bformat\s+[a-z]:|\bdel\s+/[sfq]|\brmdir\s+/s|Remove-Item\b.*-Recurse',
+    r'\bdrop\s+(?:database|table|schema)\b|\btruncate\s+table\b',
+    r'\b(?:npm|yarn|pnpm|cargo|twine)\s+publish\b|\bpip\s+upload\b',
+    r'~/\.ssh|\.env\b|\.aws/credentials',
+)]
+
+
+def is_dangerous_command(command):
+    return any(pattern.search(str(command or '')) for pattern in DANGEROUS_COMMAND_PATTERNS)
+
+
+class ApprovalMode:
+    """How much Lyra may do without asking. Lives only for this process: it always starts on "ask"."""
+
+    def __init__(self):
+        self.mode = 'ask'
+
+    def set(self, mode):
+        if mode not in APPROVAL_MODES:
+            raise ValueError(mode)
+        self.mode = mode
+
+    def cycle(self):
+        self.mode = APPROVAL_MODES[(APPROVAL_MODES.index(self.mode) + 1) % len(APPROVAL_MODES)]
+        return self.mode
+
+    def allows(self, kind, details):
+        """True when this action may run without a prompt."""
+        if self.mode == 'ask':
+            return False
+        if kind == 'edit':
+            return True
+        return self.mode == 'all' and not is_dangerous_command(details.get('Perintah'))
+
+
+APPROVAL = ApprovalMode()
+
+
+def _confirm_permission(action_title, details, kind='command'):
+    """Ask before acting, unless the approval mode already covers this kind of action.
+
+    kind is "edit" for writing files and folders, "command" for anything that runs a program.
+    """
     try:
+        if APPROVAL.allows(kind, details):
+            if kind != 'edit':
+                render_permission_box(action_title, details)
+            print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  {GREEN}{ui_symbol('✔', 'OK')} Disetujui otomatis{RESET} "
+                  f"{COLOR_DIM}(mode {APPROVAL_LABELS[APPROVAL.mode]}){RESET}\n")
+            return True
         render_permission_box(action_title, details)
         answer = input(f"  {BOLD}{YELLOW}Izinkan? (y/n) ❯ {RESET}").strip().lower()
         print()
@@ -105,7 +167,7 @@ def write_file(filepath, content):
             else:
                 print('  File lama lebih dari 2 MB; preview hanya menampilkan konten baru.')
         render_diff_preview(before, content, filepath)
-        if not _confirm_permission("Konfirmasi Tulis File", details):
+        if not _confirm_permission("Konfirmasi Tulis File", details, kind="edit"):
             return "Aksi menulis file dibatalkan oleh pengguna."
 
         parent_dir = os.path.dirname(abs_path)
@@ -126,7 +188,7 @@ def create_directory(dirpath):
             "Operasi": "Membuat Folder",
             "Path": abs_path
         }
-        if not _confirm_permission("Konfirmasi Buat Folder", details):
+        if not _confirm_permission("Konfirmasi Buat Folder", details, kind="edit"):
             return "Aksi membuat direktori dibatalkan oleh pengguna."
 
         os.makedirs(abs_path, exist_ok=True)

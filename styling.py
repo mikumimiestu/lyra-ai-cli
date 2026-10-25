@@ -559,7 +559,22 @@ def format_thinking_line_bubble(line, width=None):
 
 
 # ─── Interactive command editor ──────────────────────────────────────────────
+APPROVAL_MODES = ('ask', 'edits', 'all')
+
+
+def approval_footer(mode):
+    """Footer segment for the approval mode: (text, ansi colour)."""
+    arrows = ui_symbol('▸▸', '>>')
+    if mode == 'all':
+        return f'{arrows} AUTO SEMUA {ui_symbol("·", "-")} perintah jalan tanpa tanya (Shift+Tab ganti)', f'{BOLD}{RED}'
+    if mode == 'edits':
+        return f'{arrows} auto-setuju edit file (Shift+Tab ganti)', YELLOW
+    return f'{arrows} tanya dulu (Shift+Tab ganti)', COLOR_DIM
+
+
 COMMANDS = [
+    ('/mode', 'Atur persetujuan: tanya, edit, atau semua'),
+    ('/restart', 'Mulai ulang Lyra (setelah update)'),
     ('/status', 'Lihat ringkasan sesi dan konfigurasi'),
     ('/todos', 'Lihat daftar tugas yang sedang berjalan'),
     ('/details', 'Buka detail aktivitas terakhir'),
@@ -606,12 +621,10 @@ try:
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.styles import Style
     from prompt_toolkit.formatted_text import ANSI
-    from prompt_toolkit.layout.containers import HSplit, to_container, ConditionalContainer, DynamicContainer
+    from prompt_toolkit.layout.containers import HSplit, Window, to_container, ConditionalContainer, DynamicContainer
     from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.data_structures import Size
     from prompt_toolkit.filters import Condition
-    from prompt_toolkit.widgets import Frame
-    from prompt_toolkit.widgets.base import Border
     EDITOR_AVAILABLE = True
 except ImportError:
     EDITOR_AVAILABLE = False
@@ -625,7 +638,7 @@ if EDITOR_AVAILABLE:
 
         def _can_frame(self):
             size = self._terminal_size()
-            return unicode_terminal() and size.rows >= 7 and size.columns >= 24
+            return size.rows >= 7 and size.columns >= 24
 
         def _get_default_buffer_control_height(self):
             size = self._terminal_size()
@@ -642,25 +655,18 @@ if EDITOR_AVAILABLE:
             minimum = self._get_default_buffer_control_height().min
             return min(8, max(rows, minimum, 1) + 2)
 
-        def _rounded_frame(self, body):
-            # prompt_toolkit's Frame reads its corner glyphs at construction time.
-            glyphs = {'TOP_LEFT': '╭', 'TOP_RIGHT': '╮', 'BOTTOM_LEFT': '╰', 'BOTTOM_RIGHT': '╯'}
-            saved = {name: getattr(Border, name) for name in glyphs}
-            try:
-                if unicode_terminal():
-                    for name, glyph in glyphs.items():
-                        setattr(Border, name, glyph)
-                return Frame(body, style='class:composer', height=self._frame_height)
-            finally:
-                for name, glyph in saved.items():
-                    setattr(Border, name, glyph)
+        def _ruled(self, body):
+            """Composer between two full-width rules, as in Claude Code, instead of a closed box."""
+            glyph = '─' if unicode_terminal() else '-'
+            def rule():
+                return Window(height=1, char=glyph, style='class:composer.rule')
+            return HSplit([rule(), body, rule()], height=self._frame_height)
 
         def _create_layout(self):
             layout = super()._create_layout()
             if isinstance(layout.container, HSplit):
                 body = layout.container.children[0]
-                frame = self._rounded_frame(body)
-                framed_body = to_container(frame)
+                framed_body = to_container(self._ruled(body))
                 layout.container.children[0] = DynamicContainer(lambda: framed_body if self._can_frame() else body)
                 toolbar = layout.container.children[-1]
                 layout.container.children[-1] = ConditionalContainer(
@@ -678,11 +684,13 @@ if EDITOR_AVAILABLE:
 
 
 class TerminalInput:
-    def __init__(self, context, input_stream=None, output_stream=None):
+    def __init__(self, context, input_stream=None, output_stream=None, on_cycle_mode=None):
         self.context = context
+        self.on_cycle_mode = on_cycle_mode
         self.session = None
         self._bindings = None
         self.branch = None
+        self.notice = None   # right-aligned footer message, e.g. an available update
         # Pipes and dumb terminals keep the plain text input path.
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'
         if EDITOR_AVAILABLE and (interactive or input_stream is not None):
@@ -692,6 +700,12 @@ class TerminalInput:
             @bindings.add('c-j')
             def newline(event):
                 event.current_buffer.insert_text('\n')
+
+            @bindings.add('s-tab')
+            def cycle_mode(event):
+                if self.on_cycle_mode:
+                    self.on_cycle_mode()
+                event.app.invalidate()
 
             @bindings.add('tab')
             def complete_command(event):
@@ -716,7 +730,7 @@ class TerminalInput:
                 prompt_continuation='  ',
                 style=Style.from_dict({
                     'bottom-toolbar': 'noreverse',
-                    'frame.border': '#8b7bb8' if IS_DARK else '#7c3aed',
+                    'composer.rule': '#8b7bb8' if IS_DARK else '#7c3aed',
                     'composer.border': '#7d708f' if IS_DARK else '#88789a',
                     'composer.label': '#b6a0dc' if IS_DARK else '#7c3aed',
                     'completion-menu.completion': 'bg:#292b30 #d6d7df',
@@ -727,21 +741,32 @@ class TerminalInput:
                 input=input_stream,
                 output=output_stream,
                 reserve_space_for_menu=3,
+                erase_when_done=True,
             )
 
     def _toolbar(self):
-        context = self.context()
+        context = dict(self.context())
+        approval = context.pop('approval', 'ask')
         text = toolbar_text(**context, branch=self.branch)
         columns = self.session.app.output.get_size().columns if self.session else get_terminal_width()
         width = max(1, columns - 4)
         sep = ui_symbol('·', '/')
-        hints = f'/ perintah {sep} @ file {sep} Alt+Enter baris baru'
-        left = fit_console_text(text, width)
-        gap = width - str_width(left) - str_width(hints)
-        line = left + ' ' * gap + hints if gap >= 3 else left
         pct = context.get('context_pct')
         color = RED if pct is not None and pct >= 95 else YELLOW if pct is not None and pct >= 80 else COLOR_DIM
-        return ANSI('  {}{}{}'.format(color, line, RESET))
+        mode_text, mode_color = approval_footer(approval)
+        rest = f' {sep} / perintah {sep} @ file {sep} Esc batal {sep} Alt+Enter baris baru'
+        if str_width(mode_text + rest) <= width:
+            plain = mode_text + rest
+            second = f'{mode_color}{mode_text}{RESET}{COLOR_DIM}{rest}'
+        else:
+            plain = fit_console_text(mode_text, width)
+            second = f'{mode_color}{plain}'
+        if self.notice:
+            notice = fit_console_text(self.notice, max(1, width - 2))
+            tone = GREEN if notice.startswith(ui_symbol('✔', 'OK')) else YELLOW
+            gap = width - str_width(plain) - str_width(notice)
+            second += (' ' * gap if gap >= 3 else '') + f'{RESET}{tone}{notice}'
+        return ANSI('  {}{}{}\n  {}{}'.format(color, fit_console_text(text, width), RESET, second, RESET))
 
     def read(self):
         marker = ui_symbol('›', '>')
@@ -754,13 +779,28 @@ class TerminalInput:
                 return input(prompt)
             finally:
                 print('  ' + border)
-        if not unicode_terminal():
-            prompt = '+-- pesan --\n' + prompt
-        try:
-            return self.session.prompt(ANSI(prompt))
-        finally:
-            if not unicode_terminal():
-                print('+--' + '-' * max(1, min(get_terminal_width() - 5, 84)))
+        return self.session.prompt(ANSI(prompt))
+
+
+BAND_BG = rgb_bg(48, 48, 54) if IS_DARK else rgb_bg(228, 228, 234)
+
+
+def render_user_band(text, max_rows=12):
+    """Echo a submitted message as a full-width shaded band, like Claude Code's transcript."""
+    width = max(24, get_terminal_width())
+    room = width - 4
+    marker = ui_symbol('›', '>')
+    rows = []
+    for raw in text.replace('\t', '    ').split('\n'):
+        rows.extend(wrap_text_display_width(raw, room) or [''])
+    hidden = max(0, len(rows) - max_rows)
+    if hidden:
+        rows = rows[:max_rows - 1] + [f'… +{hidden + 1} baris']
+    print()
+    for index, row in enumerate(rows):
+        lead = f'{BOLD}{COLOR_LYRA}{marker}{RESET}{BAND_BG}' if index == 0 else ' '
+        pad = ' ' * max(0, room - str_width(row))
+        print(f'{BAND_BG} {lead} {row}{pad}{RESET}')
 
 
 def tool_call_parts(name, arguments):
@@ -976,6 +1016,10 @@ def render_todo_lines(items, indent='     '):
     return lines
 
 
+READ_ONLY_TOOLS = ('list_directory', 'read_file', 'read_memory', 'get_system_time', 'list_reminders')
+_COLLAPSE_LABELS = {'file': 'membaca {} file', 'folder': 'melihat {} folder', 'konteks': 'memeriksa {} konteks'}
+
+
 class ActivityLog:
     def __init__(self):
         self.entries = []
@@ -983,21 +1027,56 @@ class ActivityLog:
         self.started_at = None
         self.files_read = 0
         self.read_files = set()
+        self.rewrite = None        # None = detect a real terminal; tests may force True/False
+        self._open = False         # a collapsed summary line is the last thing on screen
+        self._counts = {}
+
+    def _can_rewrite(self):
+        if self.rewrite is not None:
+            return self.rewrite
+        return sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'
+
+    def close_group(self):
+        """Other output reached the screen, so the next read-only step starts a new summary line."""
+        self._open = False
+        self._counts = {}
 
     def begin_turn(self):
         import time
         self.group = None
+        self.close_group()
         self.started_at = time.monotonic()
         self.files_read = 0
         self.read_files = set()
 
-    def start(self, name, arguments):
-        self.group = activity_group(name, arguments)
+    def _print_header(self, name, arguments):
         label, value = tool_call_parts(name, arguments)
         room = max(8, get_terminal_width() - 4)
         shown = fit_console_text(value, max(1, room - str_width(label) - 2)) if value else ''
         detail = f'{COLOR_DIM}({shown}){RESET}' if value else ''
         print(f'\n{COLOR_LYRA}{ui_symbol("●", "*")}{RESET} {BOLD}{label}{RESET}{detail}')
+
+    def start(self, name, arguments):
+        self.group = activity_group(name, arguments)
+        if name in READ_ONLY_TOOLS:
+            return                      # shown as one collapsed line once the step succeeds
+        self.close_group()
+        self._print_header(name, arguments)
+
+    def _collapse(self, name):
+        kind = 'file' if name == 'read_file' else 'folder' if name == 'list_directory' else 'konteks'
+        if not self._can_rewrite():
+            self._counts = {}
+        self._counts[kind] = self._counts.get(kind, 0) + 1
+        parts = [_COLLAPSE_LABELS[key].format(count) for key, count in self._counts.items()]
+        text = ', '.join(parts)
+        text = fit_console_text(text[:1].upper() + text[1:], max(8, get_terminal_width() - 4))
+        if self._open and self._can_rewrite():
+            sys.stdout.write('\033[1A\r\033[2K')
+        else:
+            print()
+        print(f'{COLOR_DIM}{ui_symbol("●", "*")} {text}{RESET}')
+        self._open = True
 
     def finish(self, name, arguments, result):
         text = str(result)
@@ -1008,6 +1087,15 @@ class ActivityLog:
         if name == 'read_file' and not failed and not cancelled:
             self.read_files.add(os.path.normcase(os.path.abspath(str(arguments.get('filepath', '')))))
             self.files_read = len(self.read_files)
+        label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
+        self.entries.append((label, text[:12000]))
+        self.entries = self.entries[-20:]
+        if name in READ_ONLY_TOOLS:
+            if not failed and not cancelled:
+                self._collapse(name)
+                return
+            self.close_group()
+            self._print_header(name, arguments)
         color = RED if failed else COLOR_DIM if cancelled else COLOR_DIM
         summary = fit_console_text(_result_summary(name, text, failed, cancelled), max(8, get_terminal_width() - 8))
         connector = ui_symbol('⎿', 'L')
@@ -1024,19 +1112,18 @@ class ActivityLog:
                     print(line)
             except ValueError:
                 pass
-        label = fit_console_text(tool_activity(name, arguments), max(8, get_terminal_width() - 8))
-        self.entries.append((label, text[:12000]))
-        self.entries = self.entries[-20:]
 
     def complete_turn(self):
         import time
         if self.started_at is None:
             return
+        self.close_group()
         elapsed = max(0, time.monotonic() - self.started_at)
         separator = ui_symbol('·', '/')
         text = f'Selesai {separator} {elapsed:.0f}s'
         if self.files_read:
             text += f' {separator} {self.files_read} file dibaca'
+        text += f' {separator} {time.strftime("%H:%M")}'
         print(f'\n{COLOR_DIM}{ui_symbol("✻", "*")} {text}{RESET}\n')
         self.started_at = None
 

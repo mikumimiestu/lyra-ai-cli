@@ -62,7 +62,7 @@ class PreviewTests(unittest.TestCase):
             filename = Path(folder, 'demo.py')
             filename.write_text('old\n')
             output = io.StringIO()
-            def decline(*args):
+            def decline(*args, **kwargs):
                 self.assertIn('-old', output.getvalue())
                 self.assertIn('+new', output.getvalue())
                 return False
