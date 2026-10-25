@@ -102,6 +102,20 @@ class LivePtyTests(unittest.TestCase):
                 for leftover in ('Halo! Ini', '██╗', '› halo', 'tanya dulu'):
                     self.assertNotIn(leftover, text)
 
+    def test_plain_ascii_terminals_work_in_both_modes(self):
+        """A C locale (no UTF-8) used to crash live mode: the proxy claimed UTF-8 for an ASCII terminal."""
+        c_locale = {'LC_ALL': 'C', 'LANG': 'C', 'PYTHONCOERCECLOCALE': '0', 'PYTHONUTF8': '0'}
+        for name, env in (('live, C locale', dict(c_locale)), ('classic, C locale', dict(c_locale, LYRA_CLASSIC='1')),
+                          ('live, LYRA_ASCII', {'LYRA_ASCII': '1'})):
+            with self.subTest(name):
+                run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env=env)
+                self.addCleanup(run.close)
+                self.assertTrue(run.wait_for('Shift+Tab', 10), run.screen.text())
+                run.send('halo\r')
+                self.assertTrue(run.wait_for('Halo! Ini', 8), run.screen.text())
+                self.assertNotIn('Kesalahan', run.screen.text())
+                self.assertNotIn('Traceback', run.screen.text())
+
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})
         self.addCleanup(run.close)

@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.10.1 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.10.2 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -23,6 +23,10 @@
   Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
   ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Perbaikan v2.10.2
+
+Memperbaiki crash `'ascii' codec can't encode character` pada terminal tanpa dukungan UTF-8 (misalnya locale `C` di Linux, SSH, atau container). Konsol live kini mengikuti encoding terminal yang sebenarnya, sehingga tampilan otomatis beralih ke karakter ASCII sederhana. Karakter yang tetap tidak bisa ditampilkan diganti `?`, bukan membuat aplikasi berhenti.
 
 ### Baru di v2.10.1 — Keluar dengan layar bersih
 

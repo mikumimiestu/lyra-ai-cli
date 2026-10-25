@@ -30,6 +30,16 @@ class TurnCancelled(KeyboardInterrupt):
     """Esc or Ctrl+C while Lyra was working. Subclasses KeyboardInterrupt so existing handlers apply."""
 
 
+def write_safely(stream, text):
+    """Write text, replacing characters the terminal's encoding cannot represent instead of crashing."""
+    try:
+        stream.write(text)
+    except UnicodeEncodeError:
+        encoding = getattr(stream, 'encoding', None) or 'ascii'
+        stream.write(text.encode(encoding, 'replace').decode(encoding))
+    stream.flush()
+
+
 def live_supported():
     """Live mode needs a POSIX terminal and prompt_toolkit; everything else keeps the classic prompt."""
     if os.name == 'nt' or os.environ.get('LYRA_CLASSIC', '').lower() in ('1', 'true', 'yes'):
@@ -43,12 +53,18 @@ def live_supported():
 
 class LiveStdout:
     """Replaces sys.stdout while the live console runs: complete lines go above the live area."""
-    encoding = 'utf-8'
-    errors = 'replace'
-
     def __init__(self, live):
         self._live = live
         self._buffer = ''
+
+    @property
+    def encoding(self):
+        # Must mirror the real terminal: unicode_terminal() decides between ┌─┐ and +-+ from this.
+        return getattr(self._live.real_stdout, 'encoding', None) or 'utf-8'
+
+    @property
+    def errors(self):
+        return 'replace'
 
     def write(self, text):
         if not text:
@@ -192,18 +208,12 @@ class LiveState:
 
     def print_above(self, text):
         if not self._loop_usable():
-            if self.real_stdout is not None:
-                self.real_stdout.write(text)
-                self.real_stdout.flush()
-            else:
-                sys.__stdout__.write(text)
-                sys.__stdout__.flush()
+            write_safely(self.real_stdout if self.real_stdout is not None else sys.__stdout__, text)
             return
         from prompt_toolkit.application import run_in_terminal
 
         def write():
-            self.real_stdout.write(text)
-            self.real_stdout.flush()
+            write_safely(self.real_stdout, text)
         try:
             self._run_on_loop(lambda: run_in_terminal(write), timeout=15)
         except Exception:

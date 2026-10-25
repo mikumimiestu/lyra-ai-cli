@@ -64,6 +64,19 @@ class LiveStateTests(unittest.TestCase):
         self.live.check_cancel()                           # the flag is consumed
         self.assertTrue(issubclass(sp.TurnCancelled, KeyboardInterrupt))
 
+    def test_proxy_mirrors_the_real_terminal_encoding_and_never_crashes_on_it(self):
+        class AsciiTerminal(io.StringIO):
+            encoding = 'ascii'
+
+            def write(self, text):
+                text.encode('ascii')            # a real ASCII terminal raises UnicodeEncodeError here
+                return super().write(text)
+        ascii_out = AsciiTerminal()
+        self.live.real_stdout = ascii_out
+        self.assertEqual(sp.LiveStdout(self.live).encoding, 'ascii')
+        sp.write_safely(ascii_out, 'panah › dan ↓\n')
+        self.assertEqual(ascii_out.getvalue(), 'panah ? dan ?\n')
+
     def test_status_attaches_and_detaches(self):
         status = Mock()
         status.live_lines.return_value = 'menunggu'
