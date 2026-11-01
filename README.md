@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.10.2 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.11.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -23,6 +23,14 @@
   Orpheus 6 · medium · ctx ~3% | ~/projects/amagi-cli / main
   ▸▸ tanya dulu (Shift+Tab ganti) · / perintah · @ file     ✔ Update terpasang · /restart
 ```
+
+### Baru di v2.11.0 — Login dengan akun AstByte
+
+- **Dua cara masuk:** saat pertama dijalankan, pilih *Login dengan akun AstByte* atau *Pakai API key*. API key tetap bekerja seperti biasa dan ditagih dari saldo developer.
+- **Login akun:** CLI menampilkan kode dan membuka browser. Setujui kode itu di halaman AstByte, lalu kembali ke terminal. Tidak ada password yang diketik di CLI.
+- **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
+- **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
+- **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
 
 ### Perbaikan v2.10.2
 
@@ -222,6 +230,9 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | `/cd <path>` | Ganti direktori kerja aktif |
 | `/ls [path]` | Tampilkan isi direktori |
 | `/run <cmd>` | Langsung jalankan perintah terminal |
+| `/login` | Masuk dengan akun AstByte |
+| `/logout` | Keluar dari akun AstByte |
+| `/kuota` | Lihat sisa token hari ini |
 | `/reset-key` | Atur ulang ASTBYTE_API_KEY |
 | `/help` | Tampilkan daftar bantuan lengkap |
 | `exit` / `quit` | Keluar dari aplikasi |

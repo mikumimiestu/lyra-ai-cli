@@ -591,6 +591,9 @@ COMMANDS = [
     ('/clear', 'Bersihkan percakapan'),
     ('/update', 'Cek pembaruan aplikasi'),
     ('/version', 'Lihat versi terpasang'),
+    ('/login', 'Masuk dengan akun AstByte'),
+    ('/logout', 'Keluar dari akun AstByte'),
+    ('/kuota', 'Lihat sisa token hari ini'),
     ('/reset-key', 'Ganti API key'),
     ('/help', 'Lihat bantuan lengkap'),
 ]

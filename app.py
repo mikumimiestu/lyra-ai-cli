@@ -37,6 +37,7 @@ from tools import (
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
+    login_with_account, logout, fetch_quota, uses_account_login,
     VERSION, check_remote_version, perform_update
 )
 from memory import read_memory, save_memory, clear_memory
@@ -401,6 +402,36 @@ def render_help():
     print(f"  {COLOR_DIM}Tab / panah pilih perintah · Ctrl+C batalkan input · Ctrl+D keluar{RESET}\n")
 
 
+def format_duration(seconds):
+    seconds = max(0, int(seconds))
+    hours, rest = divmod(seconds, 3600)
+    minutes = rest // 60
+    return f"{hours} jam {minutes} menit" if hours else f"{minutes} menit"
+
+def quota_error_message(body):
+    """Friendly text for a 429 from the quota check; falls back to the raw body."""
+    try:
+        error = json.loads(body)["error"]
+        text = error.get("message") or body
+        reset = error.get("resets_in_seconds")
+        return text + (f" Reset dalam {format_duration(reset)}." if reset is not None else "")
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return body[:300]
+
+def show_quota(config):
+    if not uses_account_login(config):
+        print(f"\n  {DIM}Kuota token hanya berlaku untuk login akun AstByte. Pakai /login untuk masuk.{RESET}\n")
+        return
+    quota = fetch_quota(config)
+    if not quota:
+        print(f"\n  {RED}Gagal mengambil kuota. Coba lagi sebentar.{RESET}\n")
+        return
+    percent = min(100, round(quota["used"] * 100 / quota["limit"])) if quota["limit"] else 100
+    print(f"\n  {BOLD}Kuota token hari ini{RESET} {DIM}(tier {quota['tier'].upper()}){RESET}")
+    print(f"  Terpakai {quota['used']:,} dari {quota['limit']:,} token ({percent}%)")
+    print(f"  Sisa     {BOLD}{quota['remaining']:,}{RESET} token {DIM}· reset dalam {format_duration(quota['resets_in_seconds'])}{RESET}\n")
+
+
 # ─── Stream Response Handler ─────────────────────────────────────────────────
 class VisibleResponseFilter:
     """Hide reasoning and tool XML, including tags split across SSE chunks."""
@@ -576,8 +607,12 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
     """Session summary in a rounded card; never prints the API key."""
     model = MODELS[model_idx]
     effort = config.get("reasoning_effort", "medium") if model["supports_reasoning"] else "tanpa reasoning"
-    key_source = "dari ASTBYTE_API_KEY" if os.getenv("ASTBYTE_API_KEY", "").strip() else (
-        "tersimpan di config" if config.get("api_key") else "belum diatur")
+    if os.getenv("ASTBYTE_API_KEY", "").strip():
+        key_source = "dari ASTBYTE_API_KEY"
+    elif uses_account_login(config):
+        key_source = f"login akun {config.get('cli_user') or 'AstByte'}"
+    else:
+        key_source = "tersimpan di config" if config.get("api_key") else "belum diatur"
     turns = len([m for m in messages if m["role"] != "system"])
     tokens = estimate_context_tokens(messages)
     done = sum(1 for item in todo_list.items if item["status"] == "completed")
@@ -587,7 +622,7 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
         ("Reasoning", effort),
         ("Direktori", short_path(cwd)),
         ("Branch", workspace_branch(cwd) or "-"),
-        ("API key", key_source),
+        ("Akses", key_source),
         ("Endpoint", API_URL.split("/")[2]),
         ("Percakapan", f"{turns} pesan, ~{tokens:,} token ({context_percent(messages)}% dari {context_limit():,})"),
         ("Tugas", f"{done}/{len(todo_list.items)} selesai" if todo_list.items else "-"),
@@ -906,6 +941,22 @@ def _run_session(live=None):
                 print(f"\n{result}\n")
                 continue
 
+            elif user_input.lower() == "/login":
+                token = login_with_account(config)
+                if token:
+                    api_key = token
+                    headers["Authorization"] = f"Bearer {api_key}"
+                continue
+
+            elif user_input.lower() == "/logout":
+                logout(config)
+                print(f"  {DIM}Gunakan /login atau /reset-key untuk masuk lagi.{RESET}\n")
+                continue
+
+            elif user_input.lower() in ("/kuota", "/quota"):
+                show_quota(config)
+                continue
+
             elif user_input.lower() == "/reset-key":
                 reset_api_key(config)
                 api_key = get_api_key(config=config, force_prompt=True)
@@ -940,7 +991,24 @@ def _run_session(live=None):
 
                 status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
 
-                if status_code == 401:
+                if status_code == 401 and uses_account_login(config):
+                    print(f"\n  {RED}[401] Login akun berakhir atau akses perangkat ini dicabut.{RESET}")
+                    if input("  Login ulang? (y/n): ").strip().lower() == 'y':
+                        api_key = login_with_account(config)
+                        if api_key:
+                            headers["Authorization"] = f"Bearer {api_key}"
+                            continue
+                    if messages[-1]["role"] == "user":
+                        messages.pop()
+                    break
+
+                elif status_code == 429 and uses_account_login(config):
+                    print(f"\n  {YELLOW}{quota_error_message(full_content)}{RESET}\n")
+                    if messages[-1]["role"] == "user":
+                        messages.pop()
+                    break
+
+                elif status_code == 401:
                     print(f"\n  {RED}[401] API Key tidak valid atau tidak memiliki akses.{RESET}")
                     if input("  Reset API Key? (y/n): ").strip().lower() == 'y':
                         reset_api_key(config)
