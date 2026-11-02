@@ -418,6 +418,14 @@ def quota_error_message(body):
     except (ValueError, KeyError, TypeError, AttributeError):
         return body[:300]
 
+BILLING_STATE = {"balance": False, "notified": False}
+
+def note_balance_billing():
+    """Tell the user once per session that the daily quota is gone and the developer balance is being used."""
+    if BILLING_STATE["balance"] and not BILLING_STATE["notified"]:
+        BILLING_STATE["notified"] = True
+        print(f"\n  {YELLOW}Kuota harian habis, sekarang memakai saldo developer.{RESET}")
+
 def show_quota(config):
     if not uses_account_login(config):
         print(f"\n  {DIM}Kuota token hanya berlaku untuk login akun AstByte. Pakai /login untuk masuk.{RESET}\n")
@@ -429,7 +437,12 @@ def show_quota(config):
     percent = min(100, round(quota["used"] * 100 / quota["limit"])) if quota["limit"] else 100
     print(f"\n  {BOLD}Kuota token hari ini{RESET} {DIM}(tier {quota['tier'].upper()}){RESET}")
     print(f"  Terpakai {quota['used']:,} dari {quota['limit']:,} token ({percent}%)")
-    print(f"  Sisa     {BOLD}{quota['remaining']:,}{RESET} token {DIM}· reset dalam {format_duration(quota['resets_in_seconds'])}{RESET}\n")
+    print(f"  Sisa     {BOLD}{quota['remaining']:,}{RESET} token {DIM}· reset dalam {format_duration(quota['resets_in_seconds'])}{RESET}")
+    fallback = quota.get("fallback") or {}
+    if fallback.get("enabled") and fallback.get("has_key"):
+        print(f"  Cadangan {DIM}saldo developer aktif, dipakai setelah kuota habis{RESET}\n")
+    else:
+        print(f"  Cadangan {DIM}mati. Aktifkan di web: Pengaturan → Amagi CLI{RESET}\n")
 
 
 # ─── Stream Response Handler ─────────────────────────────────────────────────
@@ -527,6 +540,7 @@ def stream_ai_response(headers, data, model_info=None):
                                      stream=True, timeout=DEFAULT_TIMEOUT)
             LIVE.response = response
             LIVE.check_cancel()
+            BILLING_STATE["balance"] = response.headers.get('X-Amagi-Billing') == 'balance'
             if response.status_code != 200:
                 return response.status_code, response.text
             for raw_line in response.iter_lines():
@@ -990,6 +1004,8 @@ def _run_session(live=None):
                 }
 
                 status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
+                if status_code == 200:
+                    note_balance_billing()
 
                 if status_code == 401 and uses_account_login(config):
                     print(f"\n  {RED}[401] Login akun berakhir atau akses perangkat ini dicabut.{RESET}")
