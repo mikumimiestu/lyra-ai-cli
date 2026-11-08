@@ -161,6 +161,26 @@ class LivePtyTests(unittest.TestCase):
         carried = [m['content'] for m in self.api.requests[-1]['messages']]
         self.assertTrue(any(c.startswith('[Ringkasan') and 'pengguna menguji Lyra' in c for c in carried), carried)
 
+    def test_footer_shows_remaining_quota_and_queued_messages(self):
+        extra = (
+            'app.load_config = lambda: {"auth_method": "account", "cli_token": "tok", "model_index": 2, "reasoning_effort": "medium"}\n'
+            'app.fetch_quota = lambda config: {"limit": 20000, "used": 16000, "remaining": 4000, "tier": "free", "resets_in_seconds": 90}\n')
+        run = PtyRun(self.api.url, rows=self.ROWS, cols=140, env={'ASTBYTE_API_KEY': ''}, extra=extra)
+        self.addCleanup(run.close)
+        self.assertTrue(run.wait_for('sisa kuota 20%', 10), run.screen.text())
+        self.assertNotIn('antre', run.screen.text())
+        run.send('lama\r')
+        self.assertTrue(run.wait_for('kata2', 6))
+        run.send('satu\r')
+        run.pump(0.2)
+        run.send('dua\r')
+        self.assertTrue(run.wait_for('2 pesan antre', 4), run.screen.text())
+        run.send('\x1b')                                    # cancel the long answer; the queue then drains
+        self.assertTrue(run.wait_for('Proses dibatalkan', 4))
+        run.pump(5.0)
+        self.assertNotIn('pesan antre', run.screen.text())
+        self.assertEqual(len(self.api.requests), 3)
+
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})
         self.addCleanup(run.close)

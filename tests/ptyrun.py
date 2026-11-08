@@ -106,15 +106,16 @@ app.save_config = lambda config: None
 app.ensure_daemon_running = lambda: None
 app.check_remote_version = lambda timeout=4.0: (False, app.VERSION)
 app.get_current_system_prompt = lambda: "sistem"
+{extra}
 app.main()
 print("PROCESS-ENDED")
 '''
 
 
 class PtyRun:
-    def __init__(self, url, rows=30, cols=100, env=None):
+    def __init__(self, url, rows=30, cols=100, env=None, extra=''):
         self.screen = Screen(rows, cols)
-        code = LAUNCHER.format(root=ROOT, url=url)
+        code = LAUNCHER.format(root=ROOT, url=url, extra=extra)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.environ['TERM'] = 'xterm-256color'
@@ -167,3 +168,25 @@ class PtyRun:
             os.close(self.fd)
         except OSError:
             pass
+
+
+ONESHOT = r'''
+import sys
+sys.path.insert(0, {root!r})
+import app
+app.API_URL = {url!r}
+app.load_config = lambda: {{"api_key": "test", "model_index": 2, "reasoning_effort": "medium"}}
+app.save_config = lambda config: None
+app.get_current_system_prompt = lambda: "sistem"
+sys.argv = ["amagi"] + {args!r}
+app.main()
+'''
+
+
+def run_cli(args, url, stdin=None, timeout=30):
+    """Run `amagi <args>` as a real subprocess (no terminal) and return the CompletedProcess."""
+    import subprocess
+    env = dict(os.environ, LYRA_SESSIONS_DIR=SESSIONS_FOR_TESTS)
+    return subprocess.run([sys.executable, '-c', ONESHOT.format(root=ROOT, url=url, args=list(args))],
+                          input=stdin, stdin=None if stdin is not None else subprocess.DEVNULL, capture_output=True,
+                          text=True, timeout=timeout, env=env, cwd=ROOT)

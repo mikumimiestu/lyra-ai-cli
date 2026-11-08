@@ -602,6 +602,84 @@ COMMANDS = [
 ]
 
 
+
+# Longer help for `/help <perintah>`: usage, what it does, aliases, examples and caveats.
+COMMAND_DETAILS = {
+    '/undo': {'usage': '/undo [list]', 'desc': 'Mengembalikan perubahan file terakhir yang dibuat Lyra (write_file atau edit_file). Diff ditampilkan dan izin diminta dulu. File yang dibuat Lyra dihapus saat diurungkan.',
+              'examples': ['/undo', '/undo list'], 'notes': ['Mengingat 20 perubahan terakhir, untuk file sampai 2 MB.', 'Perubahan lewat perintah terminal (sed, git, dan sebagainya) tidak bisa diurungkan.']},
+    '/compact': {'usage': '/compact [fokus]', 'desc': 'Meringkas semua percakapan sebelum permintaan terakhir menjadi satu ringkasan pendek, supaya konteks (ctx di footer) longgar kembali.',
+                 'examples': ['/compact', '/compact fokus ke tes yang gagal'], 'notes': ['Permintaan terakhir dan tool yang sedang berjalan tetap utuh.', 'Butuh satu panggilan ke model, jadi memakai sedikit kuota.']},
+    '/resume': {'usage': '/resume [hapus]', 'desc': 'Membuka menu percakapan tersimpan lalu melanjutkan yang kamu pilih. Percakapan disimpan otomatis setelah satu giliran selesai.',
+                'examples': ['/resume', '/resume hapus'], 'notes': ['Tersimpan di ~/.amagi_sessions (30 terbaru), hanya bisa dibaca penggunamu.', '/resume hapus menghapus semuanya. LYRA_NO_HISTORY=1 mematikan penyimpanan.', 'amagi --continue langsung melanjutkan yang terakhir saat membuka aplikasi.']},
+    '/mode': {'usage': '/mode [ask|edit|all]', 'desc': 'Mengatur seberapa banyak Lyra boleh jalan tanpa bertanya. Tanpa argumen, menampilkan mode sekarang. Shift+Tab juga berganti mode.',
+              'examples': ['/mode', '/mode edit', '/mode ask'], 'notes': ['ask: setiap tulis file dan perintah meminta izin (bawaan).', 'edit: penulisan file otomatis disetujui, perintah terminal tetap bertanya.', 'all: semuanya otomatis; meminta konfirmasi y/n. Perintah berbahaya (rm -rf, sudo, git push --force, ...) tetap meminta izin.', 'Mode tidak disimpan; setiap sesi baru mulai dari ask.']},
+    '/restart': {'usage': '/restart', 'desc': 'Memulai ulang Lyra dengan versi yang terpasang, misalnya setelah /update, tanpa mengetik amagi lagi.',
+                 'examples': ['/restart'], 'notes': ['Percakapan sekarang tidak ikut; /resume bisa melanjutkannya.']},
+    '/status': {'usage': '/status', 'desc': 'Ringkasan sesi: versi, model, reasoning, direktori, branch, cara masuk, ukuran percakapan, tugas, persetujuan, perubahan yang bisa diurungkan, riwayat, daemon, dan terminal.',
+                'examples': ['/status'], 'notes': ['API key dan token tidak pernah ditampilkan.']},
+    '/todos': {'usage': '/todos', 'desc': 'Menampilkan daftar tugas yang sedang dikerjakan Lyra pada pekerjaan multi-langkah.',
+               'aliases': ['/todo'], 'examples': ['/todos'], 'notes': ['Lyra membuat dan memperbarui daftar ini sendiri.']},
+    '/details': {'usage': '/details', 'desc': 'Membuka detail lima aktivitas tool terakhir (hasil lengkap perintah dan file yang dibaca).',
+                 'examples': ['/details'], 'notes': ['Riwayat aktivitas maksimal 20, hanya di memori.']},
+    '/model': {'usage': '/model', 'desc': 'Membuka menu model Lyra. Pilihan disimpan sebagai default untuk sesi berikutnya. Model yang mendukung penalaran lanjut ke pilihan tingkat penalaran.',
+               'examples': ['/model'], 'notes': ['Gerakkan dengan ↑ ↓, Enter memilih, angka langsung memilih, Esc membatalkan.']},
+    '/reasoning': {'usage': '/reasoning', 'desc': 'Memilih tingkat penalaran: Cepat (low) atau Sedang (medium). Hanya berlaku untuk model yang mendukung penalaran.',
+                   'aliases': ['/effort'], 'examples': ['/reasoning'], 'notes': ['Tersimpan sebagai default.']},
+    '/memory': {'usage': '/memory', 'desc': 'Membaca, menambah, atau menghapus catatan jangka panjang di ~/.amagi_memory.md. Isinya ikut dibaca Lyra pada setiap pesan.',
+                'aliases': ['/mem'], 'examples': ['/memory'], 'notes': ['Lyra juga bisa menyimpan catatan sendiri saat kamu minta "ingat ini".']},
+    '/time': {'usage': '/time', 'desc': 'Menampilkan tanggal, waktu, dan zona waktu komputermu.',
+              'aliases': ['/jam', '/tanggal'], 'examples': ['/time']},
+    '/reminder': {'usage': '/reminder', 'desc': 'Menu pengingat: buat, lihat, batalkan, atau pastikan daemon latar belakang aktif. Notifikasi muncul saat waktunya tiba.',
+                  'aliases': ['/remind', '/alarm'], 'examples': ['/reminder'], 'notes': ['Waktu bisa 10m, 1h, 30s, atau 14:30.', 'Komputer harus tetap menyala.']},
+    '/project': {'usage': '/project', 'desc': 'Wizard membuat project baru: pilih tipe lewat menu, lalu isi nama dan folder tujuan.',
+                 'examples': ['/project'], 'notes': ['Tipe: react, next, vue, laravel, php, express, django, fastapi, flutter, node.', 'Perlu runtime framework yang bersangkutan (misalnya Node.js untuk React).']},
+    '/cd': {'usage': '/cd <folder>', 'desc': 'Pindah direktori kerja aktif. Lyra membaca dan menulis file relatif terhadap folder ini.',
+            'examples': ['/cd ~/projects/web', '/cd ..']},
+    '/ls': {'usage': '/ls [folder]', 'desc': 'Menampilkan isi folder (dua tingkat). Tanpa argumen memakai direktori kerja aktif.',
+            'examples': ['/ls', '/ls src']},
+    '/run': {'usage': '/run <perintah>', 'desc': 'Menjalankan perintah terminal dari direktori aktif, lewat konfirmasi eksekusi yang menampilkan seluruh perintah.',
+             'examples': ['/run git status', '/run python -m pytest'], 'notes': ['Mengikuti mode persetujuan: mode all tidak bertanya, kecuali perintah berbahaya.']},
+    '/history': {'usage': '/history', 'desc': 'Menampilkan ringkasan 10 pesan terakhir dari percakapan aktif.',
+                 'examples': ['/history'], 'notes': ['Untuk percakapan yang sudah ditutup, pakai /resume.']},
+    '/clear': {'usage': '/clear', 'desc': 'Membersihkan percakapan aktif, daftar tugas, dan konteks, lalu memulai percakapan baru.',
+               'examples': ['/clear'], 'notes': ['Percakapan sebelumnya tetap tersimpan dan bisa dilanjutkan lewat /resume.', 'Memori jangka panjang tidak ikut terhapus.']},
+    '/update': {'usage': '/update', 'desc': 'Memeriksa versi terbaru di GitHub dan menawarkan pembaruan. Setelah selesai, jalankan /restart.',
+                'aliases': ['/check-update'], 'examples': ['/update', '/restart']},
+    '/version': {'usage': '/version', 'desc': 'Menampilkan versi Lyra CLI yang terpasang.',
+                 'aliases': ['/v'], 'examples': ['/version'], 'notes': ['Di luar aplikasi: amagi --version.']},
+    '/login': {'usage': '/login', 'desc': 'Masuk dengan akun AstByte. CLI menampilkan kode dan membuka browser; setujui di halaman AstByte lalu kembali ke terminal.',
+               'examples': ['/login'], 'notes': ['Password tidak pernah diketik di CLI.', 'Memberi kuota token harian sesuai tier akunmu.']},
+    '/logout': {'usage': '/logout', 'desc': 'Keluar dari akun AstByte di perangkat ini.',
+                'examples': ['/logout'], 'notes': ['Pakai /login atau /reset-key untuk masuk lagi.']},
+    '/kuota': {'usage': '/kuota', 'desc': 'Menampilkan sisa token harian, tier, waktu reset, dan apakah saldo developer aktif sebagai cadangan.',
+               'aliases': ['/quota'], 'examples': ['/kuota'], 'notes': ['Hanya untuk login akun. Persentase sisa juga tampil di footer.']},
+    '/reset-key': {'usage': '/reset-key', 'desc': 'Menghapus API key tersimpan lalu meminta key pengganti.',
+                   'examples': ['/reset-key'], 'notes': ['Variabel ASTBYTE_API_KEY, bila diatur, dibaca lebih dulu daripada key tersimpan.']},
+    '/help': {'usage': '/help [perintah]', 'desc': 'Tanpa argumen menampilkan semua perintah. Dengan nama perintah menampilkan penjelasan, alias, dan contohnya.',
+              'aliases': ['/'], 'examples': ['/help', '/help model', '/help mode']},
+}
+
+COMMAND_ALIASES = {alias: name for name, info in COMMAND_DETAILS.items() for alias in info.get('aliases', [])}
+
+
+def resolve_command(text):
+    """Map what the user typed (`model`, `/model`, `/mem`) to a canonical command, or None."""
+    name = str(text or '').strip().lower()
+    if not name:
+        return None
+    if name != '/' and not name.startswith('/'):
+        name = '/' + name
+    name = COMMAND_ALIASES.get(name, name)
+    return name if name in COMMAND_DETAILS else None
+
+
+def suggest_commands(text, limit=3):
+    import difflib
+    name = str(text or '').strip().lower().lstrip('/')
+    pool = [c[1:] for c, _ in COMMANDS] + [a[1:] for a in COMMAND_ALIASES if len(a) > 2]
+    return ['/' + m for m in difflib.get_close_matches(name, pool, n=limit, cutoff=0.6)]
+
+
 def short_path(directory):
     home = os.path.expanduser('~')
     if directory == home:
@@ -611,12 +689,13 @@ def short_path(directory):
     return directory
 
 
-def toolbar_text(model, effort, directory, supports_reasoning=True, branch=None, context_pct=None):
+def toolbar_text(model, effort, directory, supports_reasoning=True, branch=None, context_pct=None, quota=None):
     model = model.removeprefix('Lyra ') if hasattr(str, 'removeprefix') else model.replace('Lyra ', '', 1)
     reasoning = effort if supports_reasoning else 'tanpa reasoning'
     separator = ui_symbol('·', '/')
     location = short_path(directory) + (' / ' + branch if branch else '')
     context = ' {} ctx ~{}%'.format(separator, context_pct) if context_pct is not None else ''
+    context += ' {} {}'.format(separator, quota) if quota else ''
     return '{} {} {}{}  |  {}'.format(model, separator, reasoning, context, location)
 
 
@@ -697,6 +776,12 @@ if EDITOR_AVAILABLE:
     class SlashCompleter(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
+            if text.lower().startswith('/help ') and text.count(' ') == 1:
+                partial = text[6:].lstrip('/').lower()
+                for command, description in COMMANDS:
+                    if command[1:].startswith(partial):
+                        yield Completion(command[1:], start_position=-len(partial), display_meta=description)
+                return
             if not text.startswith('/') or any(char.isspace() for char in text):
                 return
             for command, description in COMMANDS:
@@ -797,19 +882,24 @@ class TerminalInput:
     def _toolbar(self):
         context = dict(self.context())
         approval = context.pop('approval', 'ask')
+        quota_pct = context.pop('quota_pct', None)
         text = toolbar_text(**context, branch=self.branch)
         columns = self.session.app.output.get_size().columns if self.session else get_terminal_width()
         width = max(1, columns - 4)
         sep = ui_symbol('·', '/')
         pct = context.get('context_pct')
-        color = RED if pct is not None and pct >= 95 else YELLOW if pct is not None and pct >= 80 else COLOR_DIM
+        low_quota = quota_pct is not None
+        color = (RED if (pct is not None and pct >= 95) or (low_quota and quota_pct <= 10)
+                 else YELLOW if (pct is not None and pct >= 80) or (low_quota and quota_pct <= 25) else COLOR_DIM)
         mode_text, mode_color = approval_footer(approval)
+        queued = self.live.inbox.qsize() if self.live is not None else 0
+        queue_text = f' {sep} {queued} pesan antre' if queued else ''
         rest = f' {sep} / perintah {sep} @ file {sep} Esc batal {sep} Alt+Enter baris baru'
-        if str_width(mode_text + rest) <= width:
-            plain = mode_text + rest
-            second = f'{mode_color}{mode_text}{RESET}{COLOR_DIM}{rest}'
+        if str_width(mode_text + queue_text + rest) <= width:
+            plain = mode_text + queue_text + rest
+            second = f'{mode_color}{mode_text}{RESET}{YELLOW}{queue_text}{RESET}{COLOR_DIM}{rest}'
         else:
-            plain = fit_console_text(mode_text, width)
+            plain = fit_console_text(mode_text + queue_text, width)
             second = f'{mode_color}{plain}'
         if self.notice:
             notice = fit_console_text(self.notice, max(1, width - 2))

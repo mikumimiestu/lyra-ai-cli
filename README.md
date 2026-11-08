@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.12.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.12.1 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -31,6 +31,13 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.1 — Bantuan per perintah, mode satu kali tanya, dan footer lebih informatif
+
+- **`/help <perintah>`:** penjelasan satu perintah lengkap dengan pemakaian, alias, contoh, dan catatan, misalnya `/help mode`. Nama dan alias boleh ditulis dengan atau tanpa `/`. Salah ketik memunculkan saran (`/help modl` menjawab "Maksudmu /model, /mode?"). Setelah `/help `, Tab melengkapi nama perintah.
+- **`amagi --version` (`-V`) dan `--help` (`-h`):** menampilkan versi atau bantuan tanpa membuka sesi, tanpa menyentuh konfigurasi. Opsi yang tidak dikenal (atau kata lepas seperti `amagi halo`) kini ditolak dengan kode keluar 2, bukan membuka sesi.
+- **`amagi -p "pertanyaan"`:** satu kali tanya lalu keluar. Jawaban dicetak sebagai teks biasa ke stdout (tanpa warna atau hiasan, aman di-pipe), pesan kesalahan ke stderr. Isi stdin ikut sebagai konteks, misalnya `cat error.log | amagi -p "apa penyebabnya?"`. Kode keluar: `0` berhasil, `1` gagal (API atau kuota), `2` salah pakai atau belum masuk. Di mode ini Lyra hanya boleh membaca (`list_directory`, `read_file`, `search`, dan sejenisnya); menulis file dan menjalankan perintah ditolak. Percakapan tidak disimpan.
+- **Footer:** untuk login akun, tampil `sisa kuota 62%` di sebelah `ctx` (kuning di 25%, merah di 10%, atau `saldo developer` saat kuota habis dan saldo dipakai). Saat kamu mengetik sementara Lyra bekerja, footer menghitung `2 pesan antre`.
 
 ### Baru di v2.12.0 — Edit presisi, urungkan, ringkas, dan lanjutkan
 

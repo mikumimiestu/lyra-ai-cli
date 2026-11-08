@@ -27,7 +27,7 @@ from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported,
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
                      USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE,
-                     clear_terminal)
+                     clear_terminal, COMMAND_DETAILS, resolve_command, suggest_commands)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -393,7 +393,10 @@ def handle_reminder_command():
     except (EOFError, KeyboardInterrupt):
         print()
 
-def render_help():
+def render_help(topic=None):
+    if topic:
+        render_command_help(topic)
+        return
     print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}Perintah Lyra{RESET}\n")
     width = max(10, get_terminal_width() - 24)
     from styling import wrap_text_display_width
@@ -402,8 +405,37 @@ def render_help():
         print(f"  {COLOR_LYRA}{command:<16}{RESET}  {COLOR_DIM}{lines[0]}{RESET}")
         for line in lines[1:]:
             print(f"                    {COLOR_DIM}{line}{RESET}")
-    print(f"\n  {COLOR_DIM}Enter kirim · Alt+Enter / Ctrl+J baris baru{RESET}")
-    print(f"  {COLOR_DIM}Tab / panah pilih perintah · Ctrl+C batalkan input · Ctrl+D keluar{RESET}\n")
+    print(f"\n  {COLOR_DIM}/help <perintah> menampilkan penjelasan dan contoh, misalnya /help mode{RESET}")
+    print(f"  {COLOR_DIM}Enter kirim · Alt+Enter / Ctrl+J baris baru{RESET}")
+    print(f"  {COLOR_DIM}Tab / panah pilih perintah · Esc atau Ctrl+C hentikan · Shift+Tab ganti mode · Ctrl+D keluar{RESET}\n")
+
+def render_command_help(topic):
+    """/help <perintah>: usage, what it does, aliases, examples and caveats for one command."""
+    from styling import wrap_text_display_width
+    name = resolve_command(topic.split()[0] if topic.split() else topic)
+    if name is None:
+        wanted = topic.split()[0] if topic.split() else topic
+        print(f"\n  {YELLOW}Tidak ada perintah bernama '{wanted}'.{RESET}")
+        close = suggest_commands(wanted)
+        print(f"  {COLOR_DIM}" + (f"Maksudmu {', '.join(close)}? " if close else "") + f"Ketik /help untuk daftar lengkap.{RESET}\n")
+        return
+    info = COMMAND_DETAILS[name]
+    width = max(20, get_terminal_width() - 18)
+    summary = dict(COMMANDS).get(name, "")
+    print(f"\n  {COLOR_LYRA}✦{RESET} {BOLD}{name}{RESET}  {COLOR_DIM}{summary}{RESET}\n")
+    rows = [("Pemakaian", [f"{BOLD}{info['usage']}{RESET}"])]
+    rows.append(("Fungsi", wrap_text_display_width(info["desc"], width)))
+    if info.get("aliases"):
+        rows.append(("Alias", [", ".join(info["aliases"])]))
+    if info.get("examples"):
+        rows.append(("Contoh", [f"{COLOR_ACCENT}{example}{RESET}" for example in info["examples"]]))
+    for index, note in enumerate(info.get("notes", [])):
+        lines = wrap_text_display_width(note, width - 2)
+        rows.append(("Catatan" if index == 0 else "", [f"{COLOR_DIM}{ui_symbol('•', '-')} {lines[0]}{RESET}"] + [f"{COLOR_DIM}  {l}{RESET}" for l in lines[1:]]))
+    for label, lines in rows:
+        for number, line in enumerate(lines):
+            print(f"  {COLOR_DIM}{label if number == 0 else '':<11}{RESET} {line}")
+    print()
 
 
 def format_duration(seconds):
@@ -430,6 +462,55 @@ def note_balance_billing():
         BILLING_STATE["notified"] = True
         print(f"\n  {YELLOW}Kuota harian habis, sekarang memakai saldo developer.{RESET}")
 
+class QuotaMonitor:
+    """Latest daily-quota reading for the footer. Fetched in the background so the UI never waits on the network."""
+    MIN_INTERVAL = 20.0
+
+    def __init__(self):
+        self.data = None
+        self.at = 0.0
+        self._busy = False
+
+    def update(self, data):
+        self.data = data
+        self.at = time.time()
+
+    def refresh(self, config, force=False):
+        if not uses_account_login(config):
+            self.data = None
+            return
+        if self._busy or (not force and time.time() - self.at < self.MIN_INTERVAL):
+            return
+        self._busy = True
+        self.at = time.time()
+
+        def work():
+            try:
+                data = fetch_quota(config)
+                if data:
+                    self.data = data
+            finally:
+                self._busy = False
+        threading.Thread(target=work, name="lyra-quota", daemon=True).start()
+
+    def remaining_percent(self):
+        data = self.data or {}
+        limit = data.get("limit") or 0
+        if not limit:
+            return None
+        return max(0, min(100, round(float(data.get("remaining", 0)) * 100 / limit)))
+
+    def footer(self, config):
+        """(text, percent) for the footer, or (None, None) when there is nothing worth showing."""
+        if not uses_account_login(config):
+            return None, None
+        if BILLING_STATE["balance"]:
+            return "saldo developer", 20        # quota is gone; shown in the warning colour, not alarm red
+        percent = self.remaining_percent()
+        return (f"sisa kuota {percent}%", percent) if percent is not None else (None, None)
+
+QUOTA = QuotaMonitor()
+
 def show_quota(config):
     if not uses_account_login(config):
         print(f"\n  {DIM}Kuota token hanya berlaku untuk login akun AstByte. Pakai /login untuk masuk.{RESET}\n")
@@ -438,6 +519,7 @@ def show_quota(config):
     if not quota:
         print(f"\n  {RED}Gagal mengambil kuota. Coba lagi sebentar.{RESET}\n")
         return
+    QUOTA.update(quota)
     percent = min(100, round(quota["used"] * 100 / quota["limit"])) if quota["limit"] else 100
     print(f"\n  {BOLD}Kuota token hari ini{RESET} {DIM}(tier {quota['tier'].upper()}){RESET}")
     print(f"  Terpakai {quota['used']:,} dari {quota['limit']:,} token ({percent}%)")
@@ -714,8 +796,11 @@ def handle_todos_command(todo_list):
     print()
 
 # ─── Compaction ───────────────────────────────────────────────────────────────
-def collect_completion(headers, data):
-    """Run a streaming request silently and return (status, visible text). Honours Esc in the live console."""
+def _collect_stream(headers, data):
+    """Run a streaming request silently. Returns (status, visible text, raw tool-call text).
+
+    The visible text has reasoning and tool XML removed. Honours Esc in the live console.
+    """
     response = None
     parser = VisibleResponseFilter()
     chunks = []
@@ -723,8 +808,9 @@ def collect_completion(headers, data):
         response = requests.post(API_URL, headers=headers, json={**data, "stream": True}, stream=True,
                                  timeout=DEFAULT_TIMEOUT)
         LIVE.response = response
+        BILLING_STATE["balance"] = response.headers.get("X-Amagi-Billing") == "balance"
         if response.status_code != 200:
-            return response.status_code, response.text
+            return response.status_code, response.text, ""
         for raw_line in response.iter_lines():
             LIVE.check_cancel()
             line = raw_line.decode("utf-8") if raw_line else ""
@@ -740,11 +826,11 @@ def collect_completion(headers, data):
             if isinstance(content, str) and content:
                 chunks.append(parser.feed(content))
         chunks.append(parser.feed("", final=True))
-        return 200, "".join(chunks).strip()
+        return 200, "".join(chunks).strip(), "".join(parser.tool_chunks)
     except Exception as error:
         if LIVE.cancel_requested():
             LIVE.check_cancel()
-        return 0, f"Error: {error}"
+        return 0, f"Error: {error}", ""
     finally:
         LIVE.response = None
         if response is not None:
@@ -752,6 +838,11 @@ def collect_completion(headers, data):
                 response.close()
             except Exception:
                 pass
+
+def collect_completion(headers, data):
+    """Silent request for the visible text only, as (status, text). Used by /compact."""
+    status, text, _ = _collect_stream(headers, data)
+    return status, text
 
 SUMMARY_PROMPT = (
     "Kamu bertugas meringkas percakapan antara pengguna dan asisten coding supaya percakapan bisa dilanjutkan "
@@ -901,11 +992,175 @@ def handle_project_command(cwd):
         print(f"\n  {DIM}Dibatalkan.{RESET}\n")
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+CLI_HELP = """Lyra CLI v{version} - asisten AI AstByte di terminal
+
+Pemakaian:
+  amagi                         Buka sesi interaktif
+  amagi -c, --continue          Lanjutkan percakapan terakhir
+  amagi -p "pertanyaan"         Satu kali tanya lalu keluar
+  cat berkas | amagi -p "ringkas"   Sertakan isi stdin sebagai konteks
+  amagi -V, --version           Tampilkan versi
+  amagi -h, --help              Tampilkan bantuan ini
+
+Mode -p (non-interaktif):
+  Jawaban dicetak ke stdout, pesan kesalahan ke stderr. Kode keluar: 0 berhasil,
+  1 gagal (API atau kuota), 2 salah pakai atau belum masuk. Lyra hanya boleh
+  membaca (list_directory, read_file, search, ...); menulis file dan menjalankan
+  perintah ditolak. Masuk dulu lewat sesi interaktif atau set ASTBYTE_API_KEY.
+
+Variabel lingkungan:
+  ASTBYTE_API_KEY, LYRA_CLASSIC, LYRA_ASCII, NO_COLOR, LYRA_NO_ANIMATION,
+  LYRA_NO_HISTORY, LYRA_SESSIONS_DIR, LYRA_CONTEXT_TOKENS
+
+Di dalam sesi, ketik /help, atau /help <perintah> untuk penjelasan satu perintah."""
+
+PRINT_MODE_TOOLS = ("list_directory", "read_file", "search", "get_system_time", "read_memory", "list_reminders")
+PRINT_MODE_MAX_STEPS = 8
+PRINT_MODE_STDIN_LIMIT = 256 * 1024
+
+def parse_cli_args(argv):
+    """Returns (options, error). Unknown options are an error so typos never open a session."""
+    opts = {"version": False, "help": False, "print": None, "print_given": False, "continue": False, "daemon": False}
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("--daemon", "daemon"):
+            opts["daemon"] = True
+        elif arg in ("--version", "-V"):
+            opts["version"] = True
+        elif arg in ("--help", "-h"):
+            opts["help"] = True
+        elif arg in ("--continue", "-c"):
+            opts["continue"] = True
+        elif arg in ("-p", "--print"):
+            opts["print_given"] = True
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                opts["print"] = argv[i + 1]
+                i += 1
+        elif arg.startswith("--print="):
+            opts["print_given"] = True
+            opts["print"] = arg[len("--print="):]
+        else:
+            hint = ' Untuk sekali tanya pakai: amagi -p "pertanyaan".' if not arg.startswith("-") else ""
+            return opts, f"Opsi tidak dikenal: {arg}.{hint} Jalankan amagi --help."
+        i += 1
+    return opts, None
+
+def _run_read_only_tool(name, args):
+    if name == "list_directory":
+        return list_directory(args.get("path", "."), args.get("recursive", False), args.get("depth", 2))
+    if name == "read_file":
+        return read_file(args.get("filepath"))
+    if name == "search":
+        return search(args.get("pattern", ""), args.get("path", "."), args.get("glob"),
+                      bool(args.get("ignore_case", False)), args.get("max_results", 100))
+    if name == "get_system_time":
+        return get_system_time()
+    if name == "read_memory":
+        return tool_read_memory()
+    return tool_list_reminders(status=args.get("status"))
+
+def read_piped_stdin(wait=2.0):
+    """Text piped into amagi, or "" when stdin is a terminal or nothing arrives within `wait` seconds.
+
+    With a question already given, an open but silent pipe (a parent that never closes stdin) must not hang
+    the command. With no question (wait=None) stdin is the question, so it waits as long as needed.
+    """
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        if wait is not None and os.name != "nt":
+            import select
+            if not select.select([sys.stdin], [], [], wait)[0]:
+                return ""
+        return sys.stdin.read(PRINT_MODE_STDIN_LIMIT + 1)
+    except (OSError, ValueError):
+        return ""
+
+def run_print_mode(question, stdin_text=None):
+    """amagi -p: one question, the answer on stdout, problems on stderr. Returns the exit code."""
+    def fail(message, code):
+        sys.stderr.write(message.rstrip() + "\n")
+        return code
+
+    stdin_block = ""
+    if stdin_text is None:
+        stdin_text = read_piped_stdin(wait=2.0 if (question or "").strip() else None)
+    if stdin_text and stdin_text.strip():
+        clipped = len(stdin_text) > PRINT_MODE_STDIN_LIMIT
+        stdin_block = "\n\n[Masukan dari stdin]\n" + stdin_text[:PRINT_MODE_STDIN_LIMIT] + ("\n[dipotong]" if clipped else "") + "\n[Akhir masukan]"
+    if not (question or "").strip() and not stdin_block:
+        return fail('Tidak ada pertanyaan. Pakai: amagi -p "pertanyaan" (atau alirkan teks lewat stdin).', 2)
+
+    config = load_config()
+    if migrate_model_config(config):
+        save_config(config)
+    has_login = bool(os.getenv("ASTBYTE_API_KEY", "").strip() or config.get("api_key") or uses_account_login(config))
+    if not has_login:
+        return fail("Belum masuk. Jalankan 'amagi' sekali untuk login, atau set ASTBYTE_API_KEY.", 2)
+    headers = {"Authorization": f"Bearer {get_api_key(config=config)}", "Content-Type": "application/json"}
+    model_idx = config.get("model_index", DEFAULT_MODEL_INDEX)
+    if not isinstance(model_idx, int) or not 0 <= model_idx < len(MODELS):
+        model_idx = DEFAULT_MODEL_INDEX
+    note = ("\n\n[MODE NON-INTERAKTIF] Tidak ada pengguna yang bisa dimintai konfirmasi. Hanya tool baca yang tersedia ("
+            + ", ".join(PRINT_MODE_TOOLS) + "); jangan menulis file atau menjalankan perintah. Jawab ringkas dan langsung.")
+    messages = [{"role": "system", "content": get_current_system_prompt() + note},
+                {"role": "user", "content": (question or "").strip() + stdin_block}]
+    try:
+        for _ in range(PRINT_MODE_MAX_STEPS):
+            status, text, tool_text = _collect_stream(headers, {
+                "model": canonical_model_id(MODELS[model_idx]["id"]), "messages": messages, "temperature": 0.2,
+                "reasoning_effort": config.get("reasoning_effort", "medium")})
+            if BILLING_STATE["balance"] and not BILLING_STATE["notified"]:
+                BILLING_STATE["notified"] = True
+                sys.stderr.write("Kuota harian habis, memakai saldo developer.\n")
+            if status == 401:
+                return fail("[401] Akses ditolak. Masuk ulang lewat 'amagi' (/login) atau periksa ASTBYTE_API_KEY.", 1)
+            if status == 429 and uses_account_login(config):
+                return fail(quota_error_message(text), 1)
+            if status != 200:
+                return fail(f"[{status}] Gagal mendapatkan jawaban: {str(text)[:300]}", 1)
+            _, call_json = extract_tool_call(text + tool_text)
+            if not call_json:
+                if not text.strip():
+                    return fail("Layanan selesai tanpa jawaban. Coba lagi.", 1)
+                sys.stdout.write(text.strip() + "\n")
+                return 0
+            try:
+                call = json.loads(call_json)
+                name, args = call.get("name", ""), call.get("arguments", {})
+                if not isinstance(args, dict):
+                    args = {}
+            except ValueError:
+                return fail("Gagal mengurai tool call dari model.", 1)
+            if name in PRINT_MODE_TOOLS:
+                result = _run_read_only_tool(name, args)
+            else:
+                result = (f"Ditolak: mode -p hanya mengizinkan tool baca ({', '.join(PRINT_MODE_TOOLS)}). "
+                          "Jawab tanpa menulis file atau menjalankan perintah.")
+            messages.append({"role": "assistant", "content": text + tool_text})
+            messages.append({"role": "user", "content": f"[Hasil Tool '{name}']\n{result}"})
+        return fail("Terlalu banyak langkah tool tanpa jawaban akhir.", 1)
+    except KeyboardInterrupt:
+        return 130
+
 def main():
-    # Cek jika dipanggil dalam mode daemon
-    if len(sys.argv) > 1 and sys.argv[1] in ("--daemon", "daemon"):
+    opts, error = parse_cli_args(sys.argv[1:])
+    if error:
+        sys.stderr.write(error + "\n")
+        sys.exit(2)
+    if opts["version"]:
+        print(f"Lyra CLI v{VERSION}")
+        return
+    if opts["help"]:
+        print(CLI_HELP.format(version=VERSION))
+        return
+    # Mode daemon pengingat (dijalankan otomatis di latar belakang)
+    if opts["daemon"]:
         run_reminder_daemon_loop()
         sys.exit(0)
+    if opts["print_given"]:
+        sys.exit(run_print_mode(opts["print"]))
 
     if live_supported():
         # The composer stays at the bottom while Lyra works; the agent loop runs in a worker thread.
@@ -946,6 +1201,7 @@ def _run_session(live=None):
     todo_list = TodoList()
     context_warned = False
     warned_all = False
+    QUOTA.refresh(config, force=True)
     session_id = new_session_id()
     session_started = time.time()
     if any(arg in ("--continue", "-c") for arg in sys.argv[1:]):
@@ -980,6 +1236,7 @@ def _run_session(live=None):
         "supports_reasoning": MODELS[model_idx]["supports_reasoning"],
         "context_pct": context_percent(messages),
         "approval": APPROVAL.mode,
+        **dict(zip(("quota", "quota_pct"), QUOTA.footer(config))),
     }, on_cycle_mode=APPROVAL.cycle, **({"live": live} if live is not None else {}))
     if live is not None:
         live.editor = editor
@@ -1021,8 +1278,8 @@ def _run_session(live=None):
                 end_session(live, f"\n  {GREEN}Selamat tinggal! Terima kasih menggunakan Lyra CLI.{RESET}\n")
                 break
 
-            elif user_input.lower() in ("/", "/help"):
-                render_help()
+            elif user_input.strip() == "/" or user_input.split()[0].lower() == "/help":
+                render_help(user_input.split(maxsplit=1)[1].strip() if len(user_input.split(maxsplit=1)) > 1 and user_input.strip() != "/" else None)
                 continue
 
             elif user_input.lower().split()[0] == "/mode":
@@ -1150,10 +1407,12 @@ def _run_session(live=None):
                 if token:
                     api_key = token
                     headers["Authorization"] = f"Bearer {api_key}"
+                    QUOTA.refresh(config, force=True)
                 continue
 
             elif user_input.lower() == "/logout":
                 logout(config)
+                QUOTA.data = None
                 print(f"  {DIM}Gunakan /login atau /reset-key untuk masuk lagi.{RESET}\n")
                 continue
 
@@ -1196,6 +1455,7 @@ def _run_session(live=None):
                 status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
                 if status_code == 200:
                     note_balance_billing()
+                    QUOTA.refresh(config)
 
                 if status_code == 401 and uses_account_login(config):
                     print(f"\n  {RED}[401] Login akun berakhir atau akses perangkat ini dicabut.{RESET}")

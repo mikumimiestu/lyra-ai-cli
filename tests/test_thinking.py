@@ -10,7 +10,22 @@ import spinner as progress_module
 import styling
 import tools
 import tempfile
+import sys
 os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
+
+_ARGV = None
+
+
+def setUpModule():
+    """The test runner's own arguments (discover -s tests) must not reach app.main()."""
+    global _ARGV
+    _ARGV = patch.object(sys, 'argv', ['amagi'])
+    _ARGV.start()
+
+
+def tearDownModule():
+    _ARGV.stop()
+
 
 
 def event(**delta):
