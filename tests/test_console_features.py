@@ -9,6 +9,8 @@ from unittest.mock import patch
 import styling
 import tools
 from prompt_toolkit.document import Document
+import tempfile
+os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
 
 
 class FileContextTests(unittest.TestCase):

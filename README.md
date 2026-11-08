@@ -3,7 +3,7 @@
 ```text
   [Logo ASCII LYRA CLI asli]
 
-  ╭─ ✦ Lyra CLI v2.11.0 ──────────────────────────────────╮
+  ╭─ ✦ Lyra CLI v2.12.0 ──────────────────────────────────╮
   │ Mau ngerjain apa hari ini?                           │
   │ Lyra Orpheus 6 · reasoning medium                    │
   │ ~/projects/amagi-cli                                 │
@@ -31,6 +31,25 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.0 — Edit presisi, urungkan, ringkas, dan lanjutkan
+
+**Mengubah dan mencari**
+- **`edit_file`:** Lyra mengganti hanya potongan teks yang tepat di file yang sudah ada, bukan menulis ulang seluruh file. Jika potongan itu muncul lebih dari sekali, atau spasi dan indentasinya berbeda, perubahan ditolak dengan petunjuk, bukan ditebak. Akhir baris Windows (`\r\n`) dipertahankan. Preview diff dan izin tetap berlaku, dan mode `auto-setuju edit file` berlaku juga.
+- **`search`:** mencari teks dengan regex di banyak file (atau mendaftar file lewat `glob`), dengan hasil `path:baris: isi`. Folder sampah (`.git`, `node_modules`, `__pycache__`, `venv`, `dist`, dan sejenisnya), folder tersembunyi, dan file biner dilewati. Langkahnya dilipat menjadi satu baris seperti `Mencari 3 kali`.
+
+**`/undo`**
+- Lyra mengingat isi file sebelum setiap perubahan (20 terakhir, file sampai 2 MB). `/undo` mengembalikan yang terbaru setelah menampilkan diff dan meminta izin; `/undo list` menampilkan daftarnya.
+- File yang dibuat Lyra dihapus saat diurungkan. Jika file sudah kamu ubah sendiri sesudahnya, ada peringatan sebelum isi terkini ditimpa.
+- Yang tidak bisa diurungkan: perubahan lewat perintah terminal (misalnya `sed` atau `git`).
+
+**`/compact`**
+- Meringkas semua percakapan sebelum permintaan terakhir menjadi satu ringkasan pendek, lalu melanjutkan dengan konteks yang jauh lebih kecil. Permintaan terakhir dan tool yang sedang berjalan tetap utuh. `/compact fokus ke tes` mengarahkan ringkasan. Hasilnya menampilkan perkiraan token sebelum dan sesudah. Peringatan konteks di 90% kini menyarankan perintah ini.
+
+**`/resume` dan `--continue`**
+- Setiap percakapan disimpan otomatis setelah satu giliran selesai di `~/.amagi_sessions` (30 terbaru). `/resume` menampilkan menu panah untuk memilih yang dilanjutkan, `amagi --continue` (atau `-c`) langsung melanjutkan yang terakhir, dan `/resume hapus` menghapus semuanya.
+- **Privasi:** percakapan disimpan sebagai teks biasa, termasuk isi file yang kamu sertakan lewat `@` dan hasil tool. Folder dan file berizin hanya untuk pengguna (`0700` / `0600`). `LYRA_NO_HISTORY=1` mematikan penyimpanan, dan `LYRA_SESSIONS_DIR` memindahkan lokasinya.
+- `/status` menampilkan jumlah perubahan yang bisa diurungkan dan status riwayat.
 
 ### Perbaikan v2.10.2
 
@@ -214,6 +233,9 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | Perintah | Deskripsi |
 | :--- | :--- |
 | `/status` | Ringkasan sesi: versi, model, direktori, konteks, persetujuan, daemon |
+| `/undo [list]` | Urungkan perubahan file terakhir dari Lyra, atau lihat daftarnya |
+| `/compact [fokus]` | Ringkas percakapan agar konteks longgar |
+| `/resume [hapus]` | Lanjutkan percakapan tersimpan, atau hapus semuanya |
 | `/mode [ask\|edit\|all]` | Atur persetujuan otomatis (Shift+Tab juga berganti mode) |
 | `/restart` | Mulai ulang Lyra, misalnya setelah `/update` |
 | `/todos` | Lihat daftar tugas yang sedang dikerjakan Lyra |

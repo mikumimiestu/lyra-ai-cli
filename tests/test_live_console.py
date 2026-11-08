@@ -8,6 +8,8 @@ from unittest.mock import Mock, patch
 import app
 import spinner as sp
 import styling
+import tempfile
+os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
 
 
 class FakeTerminal:

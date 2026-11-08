@@ -10,6 +10,8 @@ import app
 import styling
 import tools
 from spinner import EscapeWatcher
+import tempfile
+os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
 
 
 class StreamRendererTests(unittest.TestCase):

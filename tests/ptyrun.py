@@ -15,6 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from vtscreen import Screen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+import tempfile
+SESSIONS_FOR_TESTS = tempfile.mkdtemp(prefix='lyra-pty-sessions-')
 
 
 class FakeApi:
@@ -22,6 +24,7 @@ class FakeApi:
 
     def __init__(self):
         self.requests = []
+        self.custom = []          # (predicate(last), tokens) pairs checked before the built-in scenarios
         api = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -71,6 +74,11 @@ class FakeApi:
         return f'http://127.0.0.1:{self.port}/v1/chat/completions'
 
     def script(self, last):
+        for predicate, tokens in self.custom:
+            if predicate(last):
+                return tokens
+        if 'TRANSKRIP PERCAKAPAN' in last:
+            return [('Ringkasan: pengguna menguji Lyra.', 0.01)]
         if last.startswith('[Hasil Tool'):
             return [('Selesai membaca. ', 0.01), ('Ada dua berkas.\n', 0.01)]
         if 'lama' in last:
@@ -110,6 +118,7 @@ class PtyRun:
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.environ['TERM'] = 'xterm-256color'
+            os.environ.setdefault('LYRA_SESSIONS_DIR', SESSIONS_FOR_TESTS)
             os.environ.update(env or {})
             os.environ.pop('LYRA_CLASSIC', None) if not (env and 'LYRA_CLASSIC' in env) else None
             os.chdir(ROOT)

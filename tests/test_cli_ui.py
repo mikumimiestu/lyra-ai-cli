@@ -10,6 +10,8 @@ from config import VERSION, FILES_TO_UPDATE
 from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
+import tempfile
+os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
 
 
 class EditorTests(unittest.TestCase):

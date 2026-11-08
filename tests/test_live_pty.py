@@ -1,7 +1,10 @@
 """End-to-end: the real CLI in a pseudo-terminal, with a fake streaming API (POSIX only)."""
+import json
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -115,6 +118,48 @@ class LivePtyTests(unittest.TestCase):
                 self.assertTrue(run.wait_for('Halo! Ini', 8), run.screen.text())
                 self.assertNotIn('Kesalahan', run.screen.text())
                 self.assertNotIn('Traceback', run.screen.text())
+
+    def tool_call(self, name, **arguments):
+        return [('Saya kerjakan.\n', 0.01), ('<tool_call>' + json.dumps({'name': name, 'arguments': arguments}) + '</tool_call>', 0.01)]
+
+    def test_edit_search_and_undo_work_through_the_live_console(self):
+        folder = tempfile.mkdtemp(prefix='lyra-e2e-')
+        self.addCleanup(__import__('shutil').rmtree, folder, True)
+        target = os.path.join(folder, 'versi.txt')
+        with open(target, 'w') as handle:
+            handle.write('versi = 1\n')
+        self.api.custom += [
+            (lambda last: last == 'ubah', self.tool_call('edit_file', filepath=target, old='versi = 1', new='versi = 2')),
+            (lambda last: last == 'cari', self.tool_call('search', pattern='versi', path=folder)),
+        ]
+        run = self.start()
+        run.send('cari\r')
+        self.assertTrue(run.wait_for('Mencari 1 kali', 8), run.screen.text())      # read-only step collapsed to one line
+        run.send('ubah\r')
+        self.assertTrue(run.wait_for('Izinkan?', 8), run.screen.text())            # edits still ask in the default mode
+        self.assertIn('+versi = 2', run.screen.text())                              # the diff is shown first
+        run.send('y\r')
+        self.assertTrue(run.wait_for('Berhasil mengubah', 8), run.screen.text())
+        run.pump(1.0)
+        self.assertEqual(Path(target).read_text(), 'versi = 2\n')
+        run.send('/undo\r')
+        self.assertTrue(run.wait_for('Izinkan?', 6), run.screen.text())
+        run.send('y\r')
+        self.assertTrue(run.wait_for('Dikembalikan', 6), run.screen.text())
+        self.assertEqual(Path(target).read_text(), 'versi = 1\n')
+
+    def test_compact_summarises_and_resume_flag_continues_the_saved_chat(self):
+        run = self.start()
+        for text in ('halo', 'halo lagi', 'halo ketiga'):
+            run.send(text + '\r')
+            self.assertTrue(run.wait_for('Selesai', 8))
+            run.pump(0.5)
+        run.send('/compact\r')
+        self.assertTrue(run.wait_for('Percakapan diringkas', 8), run.screen.text())
+        run.send('halo lagi\r')
+        run.pump(2.5)
+        carried = [m['content'] for m in self.api.requests[-1]['messages']]
+        self.assertTrue(any(c.startswith('[Ringkasan') and 'pengguna menguji Lyra' in c for c in carried), carried)
 
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})

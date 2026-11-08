@@ -5,6 +5,7 @@ import shlex
 import datetime
 import time
 import re
+import fnmatch
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
@@ -174,11 +175,218 @@ def write_file(filepath, content):
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
 
+        before_bytes = _read_bytes(abs_path) if os.path.isfile(abs_path) else None
         with open(abs_path, 'w', encoding='utf-8') as f:
             f.write(content)
+        after_bytes = _read_bytes(abs_path)
+        if after_bytes is not None:
+            UNDO.record(abs_path, before_bytes, after_bytes, "write_file")
         return f"✅ Berhasil menulis ke '{filepath}'."
     except Exception as e:
         return f"Error menulis file: {str(e)}"
+
+# ─── Undo stack ───────────────────────────────────────────────────────────────
+UNDO_LIMIT_BYTES = 2 * 1024 * 1024   # larger files are not backed up
+MAX_UNDO = 20
+
+
+class UndoStack:
+    """Remembers how a file looked before each change Lyra made, so /undo can put it back."""
+
+    def __init__(self):
+        self.items = []
+
+    def record(self, path, before, after, tool):
+        """before/after are bytes; before is None when Lyra created the file. Returns False when too large."""
+        if (before is not None and len(before) > UNDO_LIMIT_BYTES) or len(after) > UNDO_LIMIT_BYTES:
+            return False
+        self.items.append({"path": path, "before": before, "after": after, "tool": tool, "time": time.time()})
+        del self.items[:-MAX_UNDO]
+        return True
+
+    def clear(self):
+        self.items = []
+
+
+UNDO = UndoStack()
+
+
+def _read_bytes(path):
+    try:
+        with open(path, "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def undo_last():
+    """Restore the file touched by the most recent change, after showing what will happen."""
+    if not UNDO.items:
+        return "Belum ada perubahan yang bisa diurungkan."
+    entry = UNDO.items[-1]
+    path = entry["path"]
+    current = _read_bytes(path)
+    restoring = entry["before"]
+    changed_since = current != entry["after"]
+    details = {
+        "Operasi": "Menghapus file yang dibuat Lyra" if restoring is None else "Mengembalikan versi sebelumnya",
+        "Path": path,
+    }
+    if changed_since:
+        details["Peringatan"] = "File diubah setelah perubahan Lyra; isi terkini akan ditimpa"
+    try:
+        before_text = (current or b"").decode("utf-8", errors="replace")
+        after_text = "" if restoring is None else restoring.decode("utf-8", errors="replace")
+        render_diff_preview(before_text, after_text, path)
+        if not _confirm_permission("Konfirmasi Urungkan", details, kind="edit"):
+            return "Pengurungan dibatalkan. Perubahan tetap bisa diurungkan nanti."
+        if restoring is None:
+            if os.path.exists(path):
+                os.remove(path)
+        else:
+            with open(path, "wb") as handle:
+                handle.write(restoring)
+        UNDO.items.pop()
+        return "✅ Dihapus: " + path if restoring is None else "✅ Dikembalikan: " + path
+    except Exception as e:
+        return f"Error mengurungkan: {e}"
+
+
+def describe_undo_stack():
+    lines = []
+    for number, entry in enumerate(reversed(UNDO.items), 1):
+        verb = {"edit_file": "Ubah", "write_file": "Tulis"}.get(entry["tool"], entry["tool"])
+        lines.append(f"{number}. {time.strftime('%H:%M', time.localtime(entry['time']))} {verb} {entry['path']}"
+                     + (" (baru)" if entry["before"] is None else ""))
+    return lines
+
+
+# ─── edit_file ────────────────────────────────────────────────────────────────
+def edit_file(filepath, old, new, replace_all=False):
+    """Replace exact text inside an existing file. Shows a diff and asks before writing."""
+    try:
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            return "Error: argumen 'old' dan 'new' harus teks, dan 'old' tidak boleh kosong."
+        if old == new:
+            return "Error: 'old' dan 'new' sama, tidak ada yang berubah."
+        abs_path = os.path.abspath(str(filepath))
+        if not os.path.exists(abs_path):
+            return f"Error: File '{filepath}' tidak ditemukan. Gunakan write_file untuk membuat file baru."
+        if os.path.isdir(abs_path):
+            return f"Error: '{filepath}' adalah direktori, bukan file."
+        size = os.path.getsize(abs_path)
+        if size > 2 * 1024 * 1024:
+            return f"Error: File terlalu besar ({size // 1024} KB). Maks 2 MB."
+        raw = _read_bytes(abs_path)
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return f"Error: '{filepath}' bukan teks UTF-8."
+
+        needle, replacement = old, new
+        if "\r\n" in text and "\r\n" not in old:      # keep Windows line endings intact
+            needle, replacement = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+        count = text.count(needle)
+        if count == 0:
+            hint = " Spasi atau indentasi berbeda dari isi file." if old.strip() and old.strip() in text else ""
+            return ("Error: teks 'old' tidak ditemukan di file." + hint +
+                    " Baca ulang file dengan read_file lalu salin teks persis, termasuk spasi dan indentasi.")
+        if count > 1 and not replace_all:
+            return (f"Error: teks 'old' ditemukan {count} kali. Tambahkan baris di sekitarnya agar unik, "
+                    "atau kirim replace_all true untuk mengganti semuanya.")
+        updated = text.replace(needle, replacement) if replace_all else text.replace(needle, replacement, 1)
+        replaced = count if replace_all else 1
+
+        render_diff_preview(text, updated, filepath)
+        details = {"Operasi": "Mengubah File", "Path": abs_path, "Penggantian": str(replaced)}
+        if not _confirm_permission("Konfirmasi Ubah File", details, kind="edit"):
+            return "Aksi mengubah file dibatalkan oleh pengguna."
+        data = updated.encode("utf-8")
+        with open(abs_path, "wb") as handle:
+            handle.write(data)
+        UNDO.record(abs_path, raw, data, "edit_file")
+        return f"✅ Berhasil mengubah '{filepath}' ({replaced} penggantian)."
+    except Exception as e:
+        return f"Error mengubah file: {e}"
+
+
+# ─── search ───────────────────────────────────────────────────────────────────
+SEARCH_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "env", "dist", "build", ".next",
+                    ".mypy_cache", ".pytest_cache", ".idea", ".vscode", "target", ".gradle", ".cache", ".tox"}
+SEARCH_MAX_FILE = 1024 * 1024
+SEARCH_MAX_FILES = 20000
+
+
+def _search_files(root, glob):
+    """Yield (path, relative path) for text-like candidates under root, skipping junk and hidden folders."""
+    if os.path.isfile(root):
+        yield root, os.path.basename(root)
+        return
+    scanned = 0
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in SEARCH_SKIP_DIRS and not d.startswith("."))
+        for name in sorted(files):
+            scanned += 1
+            if scanned > SEARCH_MAX_FILES:
+                return
+            relative = os.path.relpath(os.path.join(folder, name), root)
+            if glob and not (fnmatch.fnmatch(name, glob) or fnmatch.fnmatch(relative, glob)):
+                continue
+            yield os.path.join(folder, name), relative
+
+
+def search(pattern="", path=".", glob=None, ignore_case=False, max_results=100):
+    """Regex search through text files, or list files by glob when no pattern is given."""
+    try:
+        try:
+            limit = max(1, min(int(max_results), 200))
+        except (TypeError, ValueError):
+            limit = 100
+        root = os.path.abspath(os.path.expanduser(str(path or ".")))
+        if not os.path.exists(root):
+            return f"Error: path '{path}' tidak ditemukan."
+        glob = str(glob) if glob else None
+        regex = None
+        if pattern:
+            try:
+                regex = re.compile(str(pattern), re.IGNORECASE if ignore_case else 0)
+            except re.error as error:
+                return f"Error: pola regex tidak valid: {error}"
+        elif not glob:
+            return "Error: isi 'pattern' (regex) atau 'glob' (misalnya \"*.py\")."
+
+        results = []
+        truncated = False
+        for full, relative in _search_files(root, glob):
+            if regex is None:
+                results.append(relative)
+            else:
+                try:
+                    if os.path.getsize(full) > SEARCH_MAX_FILE:
+                        continue
+                    with open(full, "rb") as handle:
+                        head = handle.read(4096)
+                        if b"\0" in head:
+                            continue
+                        data = head + handle.read()
+                except OSError:
+                    continue
+                for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+                    if regex.search(line):
+                        text = line.strip()
+                        results.append(f"{relative}:{number}: {text[:200]}{'…' if len(text) > 200 else ''}")
+                        if len(results) >= limit:
+                            break
+            if len(results) >= limit:
+                truncated = True
+                break
+        if not results:
+            return f"Tidak ada hasil untuk '{pattern or glob}'."
+        out = "\n".join(results[:limit])
+        return out + (f"\n… dipotong di {limit} hasil; persempit pola atau path." if truncated else "")
+    except Exception as e:
+        return f"Error mencari: {e}"
+
 
 def create_directory(dirpath):
     """Membuat direktori hanya jika diizinkan pengguna."""

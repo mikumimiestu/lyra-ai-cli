@@ -573,6 +573,9 @@ def approval_footer(mode):
 
 
 COMMANDS = [
+    ('/undo', 'Urungkan perubahan file terakhir dari Lyra'),
+    ('/compact', 'Ringkas percakapan agar konteks longgar'),
+    ('/resume', 'Lanjutkan percakapan yang tersimpan'),
     ('/mode', 'Atur persetujuan: tanya, edit, atau semua'),
     ('/restart', 'Mulai ulang Lyra (setelah update)'),
     ('/status', 'Lihat ringkasan sesi dan konfigurasi'),
@@ -958,6 +961,8 @@ def tool_call_parts(name, arguments):
         'list_directory': ('Lihat folder', 'path'),
         'read_file': ('Baca', 'filepath'),
         'write_file': ('Tulis', 'filepath'),
+        'edit_file': ('Ubah', 'filepath'),
+        'search': ('Cari', 'pattern'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
         'init_project': ('Buat project', 'project_name'),
@@ -971,6 +976,8 @@ def tool_call_parts(name, arguments):
     }
     label, key = labels.get(name, ('Tool ' + name, None))
     value = str(arguments.get(key, '')) if key else ''
+    if name == 'search' and not value:
+        value = str(arguments.get('glob', ''))
     # Keep paths and multiline scripts from injecting control sequences in labels.
     value = ''.join(char if char.isprintable() else ' ' for char in value)
     return label, value[:90] + ('…' if len(value) > 90 else '')
@@ -1101,9 +1108,9 @@ if EDITOR_AVAILABLE:
 
 # ─── Activity groups and change previews ─────────────────────────────────────
 def activity_group(name, arguments):
-    if name in ('list_directory', 'read_file'):
+    if name in ('list_directory', 'read_file', 'search'):
         return 'Eksplorasi'
-    if name in ('write_file', 'create_directory', 'init_project'):
+    if name in ('write_file', 'edit_file', 'create_directory', 'init_project'):
         return 'Perubahan'
     if name == 'execute_command':
         command = str(arguments.get('command', ''))
@@ -1126,6 +1133,8 @@ def _result_summary(name, text, failed, cancelled):
         return 'Membaca {} baris'.format(len(text.splitlines()))
     if name == 'list_directory':
         return '{} entri'.format(len(lines))
+    if name == 'search':
+        return 'Tidak ada hasil' if first.startswith('Tidak ada hasil') else '{} hasil'.format(len([l for l in lines if not l.startswith('…')]))
     return first or 'Selesai'
 
 
@@ -1177,8 +1186,9 @@ def render_todo_lines(items, indent='     '):
     return lines
 
 
-READ_ONLY_TOOLS = ('list_directory', 'read_file', 'read_memory', 'get_system_time', 'list_reminders')
-_COLLAPSE_LABELS = {'file': 'membaca {} file', 'folder': 'melihat {} folder', 'konteks': 'memeriksa {} konteks'}
+READ_ONLY_TOOLS = ('list_directory', 'read_file', 'search', 'read_memory', 'get_system_time', 'list_reminders')
+_COLLAPSE_LABELS = {'file': 'membaca {} file', 'folder': 'melihat {} folder', 'cari': 'mencari {} kali',
+                    'konteks': 'memeriksa {} konteks'}
 
 
 class ActivityLog:
@@ -1225,7 +1235,7 @@ class ActivityLog:
         self._print_header(name, arguments)
 
     def _collapse(self, name):
-        kind = 'file' if name == 'read_file' else 'folder' if name == 'list_directory' else 'konteks'
+        kind = {'read_file': 'file', 'list_directory': 'folder', 'search': 'cari'}.get(name, 'konteks')
         if not self._can_rewrite():
             self._counts = {}
         self._counts[kind] = self._counts.get(kind, 0) + 1

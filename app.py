@@ -33,14 +33,15 @@ from tools import (
     create_directory, init_project, DEFAULT_TIMEOUT,
     get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
     tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList,
-    APPROVAL, APPROVAL_LABELS
+    APPROVAL, APPROVAL_LABELS, edit_file, search, UNDO, undo_last, describe_undo_stack
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
     login_with_account, logout, fetch_quota, uses_account_login,
     VERSION, check_remote_version, perform_update
 )
-from memory import read_memory, save_memory, clear_memory
+from memory import (read_memory, save_memory, clear_memory, new_session_id, save_session, list_sessions,
+                    load_session, delete_all_sessions, relative_time, history_enabled)
 from reminder import (
     add_reminder, list_reminders, cancel_reminder,
     ensure_daemon_running, is_daemon_running, run_reminder_daemon_loop
@@ -137,7 +138,9 @@ Untuk memanggil tool, sertakan blok XML ini TEPAT di akhir jawabanmu:
 Daftar tool yang tersedia:
 - list_directory   : Mendaftar file/folder. Args: {{"path": ".", "recursive": false, "depth": 2}}
 - read_file        : Membaca teks file.     Args: {{"filepath": "path/ke/file"}}
-- write_file       : Menulis/edit file.     Args: {{"filepath": "path", "content": "isi file"}}
+- write_file       : Membuat file baru atau menulis ulang seluruh isi file. Args: {{"filepath": "path", "content": "isi file"}}
+- edit_file        : Mengubah SEBAGIAN file yang sudah ada dengan mengganti teks persis. Args: {{"filepath": "path", "old": "teks lama persis", "new": "teks baru", "replace_all": false}}
+- search           : Cari teks (regex) di banyak file atau daftar file lewat glob. Args: {{"pattern": "regex", "path": ".", "glob": "*.py", "ignore_case": false, "max_results": 100}}
 - create_directory : Membuat folder baru.   Args: {{"dirpath": "path/ke/folder"}}
 - execute_command  : Jalankan terminal.     Args: {{"command": "perintah", "cwd": "/optional/path", "timeout": 600}}
 - init_project     : Scaffolding project baru (NON-INTERAKTIF, langsung jalan).
@@ -155,7 +158,8 @@ Panduan fitur khusus:
 2. Tanggal & Waktu: Selalu gunakan informasi waktu laptop terkini di atas saat menjawab pertanyaan terkait waktu.
 3. Pengingat & Notifikasi: Jika pengguna minta ingatkan sesuatu ("ingatkan saya 10 menit lagi untuk...", "set alarm jam 8 pagi"), gunakan tool `set_reminder`.
 4. Daftar tugas: Untuk pekerjaan dengan 3 langkah atau lebih, mulai dengan `update_todos`, jaga tepat satu item berstatus in_progress, dan perbarui daftar setiap satu langkah selesai. Jangan pakai untuk permintaan sederhana.
-5. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
+5. Mengubah file: untuk file yang sudah ada, baca dulu dengan `read_file`, lalu pakai `edit_file` dengan potongan `old` yang unik dan persis (termasuk spasi). Pakai `write_file` hanya untuk file baru atau penulisan ulang total. Pakai `search` untuk menemukan kode sebelum membaca banyak file.
+6. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
 """
 
 def get_current_system_prompt():
@@ -641,6 +645,8 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
         ("Percakapan", f"{turns} pesan, ~{tokens:,} token ({context_percent(messages)}% dari {context_limit():,})"),
         ("Tugas", f"{done}/{len(todo_list.items)} selesai" if todo_list.items else "-"),
         ("Persetujuan", APPROVAL_LABELS[APPROVAL.mode]),
+        ("Urungkan", f"{len(UNDO.items)} perubahan bisa diurungkan" if UNDO.items else "-"),
+        ("Riwayat", "tersimpan di ~/.amagi_sessions" if history_enabled() else "dimatikan (LYRA_NO_HISTORY)"),
         ("Memori", f"{len(read_memory().strip())} karakter"),
         ("Pengingat", "daemon aktif" if is_daemon_running() else "daemon mati"),
         ("Terminal", f"{get_terminal_width()} kolom, {'unicode' if unicode_terminal() else 'ASCII'}, {'warna' if USE_COLOR else 'tanpa warna'}"),
@@ -706,6 +712,160 @@ def handle_todos_command(todo_list):
     for line in render_todo_lines(todo_list.items, indent="  "):
         print(line)
     print()
+
+# ─── Compaction ───────────────────────────────────────────────────────────────
+def collect_completion(headers, data):
+    """Run a streaming request silently and return (status, visible text). Honours Esc in the live console."""
+    response = None
+    parser = VisibleResponseFilter()
+    chunks = []
+    try:
+        response = requests.post(API_URL, headers=headers, json={**data, "stream": True}, stream=True,
+                                 timeout=DEFAULT_TIMEOUT)
+        LIVE.response = response
+        if response.status_code != 200:
+            return response.status_code, response.text
+        for raw_line in response.iter_lines():
+            LIVE.check_cancel()
+            line = raw_line.decode("utf-8") if raw_line else ""
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:].strip()
+            if payload == "[DONE]":
+                break
+            try:
+                content = json.loads(payload)["choices"][0]["delta"].get("content") or ""
+            except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+                continue
+            if isinstance(content, str) and content:
+                chunks.append(parser.feed(content))
+        chunks.append(parser.feed("", final=True))
+        return 200, "".join(chunks).strip()
+    except Exception as error:
+        if LIVE.cancel_requested():
+            LIVE.check_cancel()
+        return 0, f"Error: {error}"
+    finally:
+        LIVE.response = None
+        if response is not None:
+            try:
+                response.close()
+            except Exception:
+                pass
+
+SUMMARY_PROMPT = (
+    "Kamu bertugas meringkas percakapan antara pengguna dan asisten coding supaya percakapan bisa dilanjutkan "
+    "dengan konteks yang jauh lebih kecil. Tulis ringkasan padat dalam bahasa yang sama dengan percakapan, "
+    "maksimal sekitar 400 kata, dengan bagian: Tujuan pengguna, Yang sudah dikerjakan (file yang dibuat atau "
+    "diubah, perintah penting, hasilnya), Keputusan dan preferensi, Tugas yang tersisa, Fakta penting "
+    "(path, nama, angka). Jangan menjawab pertanyaan di dalam percakapan dan jangan memanggil tool."
+)
+
+def _is_real_user_message(message):
+    content = str(message.get("content", ""))
+    return message.get("role") == "user" and not content.startswith("[Hasil Tool") and not content.startswith("[Ringkasan")
+
+def compact_messages(messages, headers, model_id, effort, focus=""):
+    """Replace everything before the latest user request with a summary.
+
+    Returns (new_messages, error). The latest request and anything after it stay word for word.
+    """
+    system = messages[0] if messages and messages[0].get("role") == "system" else None
+    body = messages[1:] if system else list(messages)
+    split = max((i for i, m in enumerate(body) if _is_real_user_message(m)), default=0)
+    older, tail = body[:split], body[split:]
+    if len(older) < 3:
+        return None, "Percakapan masih pendek, belum perlu diringkas."
+    pieces = []
+    for message in older:
+        text = str(message.get("content", ""))
+        limit = 1500 if text.startswith("[Hasil Tool") else 4000
+        pieces.append(f"{message['role'].upper()}: {text[:limit]}" + (" …[dipotong]" if len(text) > limit else ""))
+    transcript = "\n\n".join(pieces)
+    if len(transcript) > 90000:
+        transcript = "…[bagian awal dipotong]\n\n" + transcript[-90000:]
+    request = "TRANSKRIP PERCAKAPAN:\n\n" + transcript + "\n\nTulis ringkasannya sekarang." + (f"\nFokus khusus: {focus}" if focus else "")
+    status, text = collect_completion(headers, {
+        "model": canonical_model_id(model_id),
+        "messages": [{"role": "system", "content": SUMMARY_PROMPT}, {"role": "user", "content": request}],
+        "temperature": 0.2, "reasoning_effort": effort,
+    })
+    if status != 200:
+        return None, f"Gagal meringkas ({status}): {str(text)[:200]}"
+    if not text.strip():
+        return None, "Layanan tidak mengembalikan ringkasan. Percakapan tidak diubah."
+    summary = [
+        {"role": "user", "content": "[Ringkasan percakapan sebelumnya — gunakan sebagai konteks, jangan dibalas]\n" + text.strip()},
+        {"role": "assistant", "content": "Baik, saya lanjutkan berdasarkan ringkasan tersebut."},
+    ]
+    return ([system] if system else []) + summary + tail, None
+
+def handle_compact_command(messages, headers, model_id, effort, focus=""):
+    """Returns the new message list (or the old one when nothing changed)."""
+    before = estimate_context_tokens(messages)
+    spinner = Spinner("Meringkas percakapan...")
+    spinner.start()
+    try:
+        new_messages, error = compact_messages(messages, headers, model_id, effort, focus)
+    finally:
+        spinner.stop()
+    note = f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  "
+    if error:
+        print(f"\n{note}{YELLOW}{error}{RESET}\n")
+        return messages
+    after = estimate_context_tokens(new_messages)
+    print(f"\n{note}Percakapan diringkas: ~{before:,} → ~{after:,} token {COLOR_DIM}({len(messages) - len(new_messages) + 2} pesan lama jadi ringkasan){RESET}\n")
+    return new_messages
+
+# ─── Undo, saved sessions ─────────────────────────────────────────────────────
+def handle_undo_command(user_input):
+    parts = user_input.split()
+    if len(parts) > 1 and parts[1].lower() in ("list", "daftar"):
+        lines = describe_undo_stack()
+        print()
+        if not lines:
+            print(f"  {COLOR_DIM}Belum ada perubahan yang bisa diurungkan.{RESET}\n")
+            return
+        print(f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {BOLD}Bisa diurungkan{RESET} {COLOR_DIM}(paling baru dulu; /undo mengurungkan nomor 1){RESET}")
+        for line in lines:
+            print(f"  {line}")
+        print()
+        return
+    print()
+    result = undo_last()
+    print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  {result}\n")
+
+def handle_resume_command(user_input, active_cwd):
+    """Pick a saved conversation. Returns the session dict to continue, or None."""
+    parts = user_input.split()
+    if len(parts) > 1 and parts[1].lower() in ("hapus", "clear", "delete"):
+        try:
+            answer = input(f"\n  {RED}Hapus SEMUA percakapan tersimpan di ~/.amagi_sessions? (y/n) ❯{RESET} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  " + (f"{delete_all_sessions()} sesi dihapus." if answer == "y" else "Tidak ada yang dihapus.") + "\n")
+        return None
+    if not history_enabled():
+        print(f"\n  {YELLOW}Riwayat dimatikan (LYRA_NO_HISTORY).{RESET}\n")
+        return None
+    sessions = list_sessions()
+    if not sessions:
+        print(f"\n  {COLOR_DIM}Belum ada percakapan tersimpan.{RESET}\n")
+        return None
+    options = [(item["title"], f"{relative_time(item['updated'])} · {item['count']} pesan · {short_path(item['cwd'])}" if item["cwd"] else
+                f"{relative_time(item['updated'])} · {item['count']} pesan") for item in sessions]
+    picked = pick_option("Lanjutkan percakapan", options, 0, "Percakapan tersimpan di ~/.amagi_sessions. /resume hapus menghapus semuanya.")
+    if picked is None:
+        print(f"  {DIM}Dibatalkan.{RESET}\n")
+        return None
+    data = load_session(sessions[picked]["id"])
+    if data is None:
+        print(f"  {RED}Sesi tidak bisa dibaca.{RESET}\n")
+        return None
+    other = data.get("cwd") and os.path.abspath(data["cwd"]) != os.path.abspath(active_cwd)
+    print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Dilanjutkan: {BOLD}{data['title']}{RESET} {COLOR_DIM}({len(data['messages'])} pesan)"
+          + (f"; dibuat di {short_path(data['cwd'])}, folder aktif tidak berubah" if other else "") + f"{RESET}\n")
+    return data
 
 PROJECT_TYPES = [
     ("react", "React"), ("next", "Next.js"), ("vue", "Vue"), ("laravel", "Laravel (PHP)"), ("php", "PHP polos"),
@@ -786,6 +946,15 @@ def _run_session(live=None):
     todo_list = TodoList()
     context_warned = False
     warned_all = False
+    session_id = new_session_id()
+    session_started = time.time()
+    if any(arg in ("--continue", "-c") for arg in sys.argv[1:]):
+        latest = list_sessions(1)
+        loaded = load_session(latest[0]["id"]) if latest else None
+        if loaded:
+            messages += loaded["messages"]
+            session_id, session_started = loaded["id"], loaded.get("started", session_started)
+            print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Melanjutkan: {BOLD}{loaded['title']}{RESET} {COLOR_DIM}({len(loaded['messages'])} pesan){RESET}")
 
     # Pastikan daemon pengingat latar belakang berjalan
     ensure_daemon_running()
@@ -861,6 +1030,26 @@ def _run_session(live=None):
                 warned_all = APPROVAL.mode == "all"
                 continue
 
+            elif user_input.lower().split()[0] == "/undo":
+                handle_undo_command(user_input)
+                continue
+
+            elif user_input.lower().split()[0] == "/compact":
+                messages = handle_compact_command(messages, headers, MODELS[model_idx]["id"],
+                                                  config.get("reasoning_effort", "medium"), user_input[len("/compact"):].strip())
+                save_session(session_id, messages, active_cwd, session_started)
+                context_warned = False
+                continue
+
+            elif user_input.lower().split()[0] == "/resume":
+                resumed = handle_resume_command(user_input, active_cwd)
+                if resumed:
+                    messages = [{"role": "system", "content": get_current_system_prompt()}] + resumed["messages"]
+                    session_id, session_started = resumed["id"], resumed.get("started", time.time())
+                    todo_list.clear()
+                    context_warned = False
+                continue
+
             elif user_input.lower() == "/status":
                 handle_status_command(config, model_idx, active_cwd, messages, todo_list)
                 continue
@@ -916,6 +1105,7 @@ def _run_session(live=None):
                 messages = [{"role": "system", "content": get_current_system_prompt()}]
                 todo_list.clear()
                 context_warned = False
+                session_id, session_started = new_session_id(), time.time()
                 print(f"  {GREEN}✓ Riwayat percakapan dibersihkan.{RESET}\n")
                 continue
 
@@ -990,7 +1180,7 @@ def _run_session(live=None):
             messages.append({"role": "user", "content": message_content})
             if not context_warned and context_percent(messages) >= 90:
                 context_warned = True
-                print(f"\n  {YELLOW}{ui_symbol('⚠', '!')} Konteks hampir penuh (~{context_percent(messages)}%). Pertimbangkan /clear agar jawaban tetap akurat.{RESET}")
+                print(f"\n  {YELLOW}{ui_symbol('⚠', '!')} Konteks hampir penuh (~{context_percent(messages)}%). Ketik /compact untuk meringkas, atau /clear untuk mulai baru.{RESET}")
 
             while True:
                 current_model  = canonical_model_id(MODELS[model_idx]["id"])
@@ -1070,6 +1260,12 @@ def _run_session(live=None):
                         result = read_file(args.get("filepath"))
                     elif func_name == "write_file":
                         result = write_file(args.get("filepath"), args.get("content", ""))
+                    elif func_name == "edit_file":
+                        result = edit_file(args.get("filepath"), args.get("old", ""), args.get("new", ""),
+                                           bool(args.get("replace_all", False)))
+                    elif func_name == "search":
+                        result = search(args.get("pattern", ""), args.get("path", "."), args.get("glob"),
+                                        bool(args.get("ignore_case", False)), args.get("max_results", 100))
                     elif func_name == "create_directory":
                         result = create_directory(args.get("dirpath"))
                     elif func_name == "execute_command":
@@ -1115,6 +1311,7 @@ def _run_session(live=None):
                     continue
                 else:
                     activity.complete_turn()
+                    save_session(session_id, messages, active_cwd, session_started)
                     break
 
         except KeyboardInterrupt:

@@ -9,6 +9,8 @@ import app
 import spinner as progress_module
 import styling
 import tools
+import tempfile
+os.environ.setdefault('LYRA_SESSIONS_DIR', tempfile.mkdtemp(prefix='lyra-test-sessions-'))
 
 
 def event(**delta):
