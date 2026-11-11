@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.6
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.7
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,13 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.7 — Tailwind, tampilan lebih rapi, dan Python otomatis
+
+- **Tailwind CSS di `/project`:** Lyra menanyakan "Pasang Tailwind CSS?" lalu mengatur konfigurasinya sendiri. Vite (React, Vue, Svelte): memasang `tailwindcss` dan `@tailwindcss/vite`, menambah plugin ke `vite.config` dan `@import "tailwindcss";` ke CSS utama. Next.js: lewat flag `--tailwind`. Django, Flask, dan PHP: Tailwind CLI, template dasar, dan skrip `build:css`/`watch:css`. Laravel sudah membawa Tailwind. Kalau `vite.config` berbentuk tak dikenal, Lyra memberi tahu langkah manualnya, bukan gagal.
+- **`/memory` rapi:** catatan bernomor dengan tanggal redup dan teks terbungkus, tampil di dalam menu dan hilang saat ditutup. `/status`, `/todos`, `/time`, `/kuota`, `/instruksi`, dan `/reminder` juga menghilang dari layar saat ditutup dengan Enter atau Esc.
+- **Dialog izin ringkas:** perintah yang menulis file lewat `cat <<EOF` hanya menampilkan 3 baris isi lalu "… +N baris isi file"; perintah dan sisa setelahnya tetap terlihat. Ketik `v` untuk melihat semuanya. Baris aktivitas menjadi "Tulis (shell) · src/App.tsx".
+- **Python dipasang otomatis:** kalau installer tidak menemukan Python 3.7+ (dengan venv dan pip), ia menawarkan memasangnya: apt/dnf/yum/pacman/zypper/apk di Linux, Homebrew lalu installer python.org di Mac, winget lalu installer python.org per-pengguna di Windows. Selalu bertanya dulu; untuk instalasi tanpa terminal gunakan `AMAGI_ASSUME_YES=1`.
 
 ### Perbaikan v2.12.6 — Pembuatan project (`/project`)
 

@@ -1,6 +1,7 @@
 """End-to-end: the real CLI in a pseudo-terminal, with a fake streaming API (POSIX only)."""
 import json
 import os
+import time
 import sys
 import tempfile
 import unittest
@@ -251,11 +252,41 @@ class LivePtyTests(unittest.TestCase):
         run.send('/instruksi\r')
         self.assertTrue(run.wait_for('Instruksi project yang dimuat', 5), run.screen.text())
         self.assertIn('LYRA.md', run.screen.text())
+        run.send('\r')                                      # closing the panel leaves nothing behind
+        deadline = time.time() + 4
+        while time.time() < deadline and run.screen.find('Instruksi project yang dimuat') is not None:
+            run.pump(0.1)
+        self.assertIsNone(run.screen.find('Instruksi project yang dimuat'), run.screen.text())
         run.send('halo\r')
         self.assertTrue(run.wait_for('Instruksi project dimuat', 6), run.screen.text())
         self.assertTrue(run.wait_for('Halo! Ini', 8))
         system = self.api.requests[-1]['messages'][0]['content']
         self.assertIn('Selalu jawab dengan satu kata: SIAP.', system)
+
+    def test_memory_view_is_tidy_and_vanishes_when_closed(self):
+        home = os.path.realpath(tempfile.mkdtemp(prefix='lyra-home-'))
+        self.addCleanup(__import__('shutil').rmtree, home, True)
+        Path(home, '.amagi_memory.md').write_text(
+            '# Memori\n\n- [2026-11-10 09:15:02] Pengguna lebih suka jawaban singkat dalam bahasa Indonesia, tanpa basa-basi '
+            'dan selalu sertakan contoh kode bila relevan untuk pertanyaan teknis.\n- [2026-11-11 10:00:00] Proyek utama: amagi-cli\n',
+            encoding='utf-8')
+        run = PtyRun(self.api.url, rows=self.ROWS, cols=90, env={'HOME': home})
+        self.addCleanup(run.close)
+        self.assertTrue(run.wait_for('Shift+Tab', 10), run.screen.text())
+        run.send('/memory\r')
+        self.assertTrue(run.wait_for('Memori jangka panjang', 5), run.screen.text())
+        text = run.screen.text()
+        self.assertIn('2 catatan', text)
+        self.assertIn('1. Pengguna lebih suka', text)
+        self.assertIn('2026-11-10 09:15', text)
+        self.assertIn('2. Proyek utama: amagi-cli', text)
+        self.assertNotIn('[2026', text)
+        run.send('\x1b')
+        deadline = time.time() + 4
+        while time.time() < deadline and run.screen.find('Memori jangka panjang') is not None:
+            run.pump(0.1)
+        self.assertIsNone(run.screen.find('Memori jangka panjang'), run.screen.text())
+        self.assertIsNone(run.screen.find('Proyek utama'), run.screen.text())
 
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})

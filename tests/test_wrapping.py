@@ -182,3 +182,54 @@ class HeadingTests(unittest.TestCase):
         for step in (1, 3, 5):
             self.assertEqual(styling.strip_ansi(render(text, 80, step=step, wrap=False)), whole, step)
         self.assertEqual(len([l for l in whole.splitlines() if 'Manfaat' in l]), 1)
+
+
+class LongCommandDialogTests(unittest.TestCase):
+    FILE = "cat > src/App.tsx <<'EOF'\n" + "\n".join(f"line {i} of the component" for i in range(60)) + "\nEOF\nnpm run build"
+
+    def page(self, command, full=False):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), patch.object(styling, 'get_terminal_width', return_value=100):
+            folded = styling.render_permission_box('Konfirmasi Eksekusi Perintah', {'Perintah': command}, full=full)
+        return styling.strip_ansi(out.getvalue()), folded
+
+    def test_inline_file_body_is_folded_but_command_and_tail_stay(self):
+        page, folded = self.page(self.FILE)
+        self.assertTrue(folded)
+        self.assertIn("cat > src/App.tsx", page)
+        self.assertIn('line 0 of', page)
+        self.assertNotIn('line 30 of', page)
+        self.assertIn('+57 baris isi file', page)
+        self.assertIn('npm run build', page)
+        self.assertLess(len(page.splitlines()), 14)
+
+    def test_full_view_shows_everything(self):
+        page, folded = self.page(self.FILE, full=True)
+        self.assertFalse(folded)
+        self.assertIn('line 59 of', page)
+
+    def test_short_commands_are_never_folded(self):
+        page, folded = self.page("echo hi\nls -la")
+        self.assertFalse(folded)
+
+    def test_very_long_script_keeps_head_and_tail(self):
+        page, folded = self.page("\n".join(f"echo step{i}" for i in range(40)))
+        self.assertTrue(folded)
+        self.assertIn('echo step0', page)
+        self.assertIn('echo step39', page)
+        self.assertNotIn('echo step20', page)
+
+    def test_confirmation_offers_view_all_then_asks_again(self):
+        import tools
+        with contextlib.redirect_stdout(io.StringIO()) as out, patch('builtins.input', side_effect=['v', 'y']) as ask, \
+             patch.object(tools.APPROVAL, 'allows', return_value=False):
+            allowed = tools._confirm_permission('Konfirmasi Eksekusi Perintah', {'Perintah': self.FILE})
+        self.assertTrue(allowed)
+        self.assertEqual(ask.call_count, 2)
+        self.assertIn('line 59 of', styling.strip_ansi(out.getvalue()))
+
+    def test_activity_line_names_the_file_not_the_script(self):
+        label, value = styling.tool_call_parts('execute_command', {'command': self.FILE})
+        self.assertEqual((label, value), ('Tulis (shell)', 'src/App.tsx'))
+        label, value = styling.tool_call_parts('execute_command', {'command': 'npm test\nnpm build'})
+        self.assertEqual(value, 'npm test …')

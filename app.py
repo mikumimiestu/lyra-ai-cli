@@ -9,6 +9,8 @@ if _current_dir not in sys.path:
 import requests
 import json
 import re
+import io
+import contextlib
 import subprocess
 import threading
 import time
@@ -27,7 +29,7 @@ from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported,
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
                      USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE,
-                     clear_terminal, COMMAND_DETAILS, resolve_command, suggest_commands, EDITOR_AVAILABLE)
+                     clear_terminal, show_panel, COMMAND_DETAILS, resolve_command, suggest_commands, EDITOR_AVAILABLE)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -147,7 +149,8 @@ Daftar tool yang tersedia:
 - init_project     : Scaffolding project baru (NON-INTERAKTIF, langsung jalan).
                      Tipe: react, next, vue, svelte, node, express, fastapi, django, flask, laravel, php, flutter.
                      Nama: huruf/angka/._- saja (Django: pengenal Python; Flutter: huruf kecil_dan_garis_bawah).
-                     Args: {{"project_type": "TIPE", "project_name": "nama", "target_dir": "/optional"}}
+                     Args: {{"project_type": "TIPE", "project_name": "nama", "target_dir": "/optional", "tailwind": true}}
+                     "tailwind": true memasang Tailwind CSS v4 dan mengatur konfigurasinya otomatis (react, vue, svelte, next, django, flask, php).
 - save_memory      : Simpan fakta/catatan ke file memori ~/.amagi_memory.md. Args: {{"content": "catatan", "mode": "append"}}
 - read_memory      : Baca isi file memori ~/.amagi_memory.md. Args: {{}}
 - get_system_time  : Ambil tanggal, waktu, dan timezone laptop pengguna. Args: {{}}
@@ -220,15 +223,19 @@ def render_model_selector(current_idx):
     bot_b = "─" * w
     print(f"  {B}╰{bot_b}╯{R}")
 
-def pick_option(title, options, selected=0, subtitle=""):
+def pick_option(title, options, selected=0, subtitle="", body=None):
     """Arrow-key menu; without a terminal it falls back to numbered input.
 
     Returns the 0-based index, or None when cancelled or the typed number is invalid.
     """
-    picked = choose(title, options, selected, subtitle)
+    picked = choose(title, options, selected, subtitle, body=body)
     if picked is not NOT_INTERACTIVE:
         return picked
     print(f"\n  {BOLD}{COLOR_LYRA}{ui_symbol('✦', '*')} {title}{RESET}\n")
+    for line in body or []:
+        print(line)
+    if body:
+        print()
     for number, (label, description) in enumerate(options, 1):
         print(f"  {number}. {BOLD}{label}{RESET}" + (f" {DIM}- {description}{RESET}" if description else ""))
     try:
@@ -375,14 +382,57 @@ def restart_application():
     except OSError as error:
         print(f"  {RED}Gagal memulai ulang: {error}. Jalankan 'amagi' lagi secara manual.{RESET}\n")
 
+def info_panel(title, show, *args):
+    """Run a printing handler and show its output in a panel that disappears when closed.
+
+    Without a terminal (pipes, dumb terminals) the output is simply printed, as before.
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        show(*args)
+    lines = buffer.getvalue().rstrip().split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    if show_panel(lines, title) is NOT_INTERACTIVE:
+        print(buffer.getvalue(), end="")
+
+MEMORY_NOTE = re.compile(r"^-\s*\[(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?\]\s*(.*)$")
+
+def memory_body(text):
+    """Memory notes as tidy, wrapped lines: number, dimmed date, note text with a hanging indent."""
+    notes = []
+    for raw in text.splitlines():
+        raw = raw.rstrip()
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        found = MEMORY_NOTE.match(raw.strip())
+        if found:
+            notes.append((f"{found.group(1)} {found.group(2)}", found.group(3)))
+        elif raw.startswith((" ", "\t")) and notes:
+            notes[-1] = (notes[-1][0], notes[-1][1] + " " + raw.strip())
+        else:
+            notes.append(("", raw.strip().lstrip("-* ").strip()))
+    if not notes:
+        return notes, [f"  {COLOR_DIM}Memori masih kosong. Pilih \"Tambah catatan baru\" atau minta Lyra mengingat sesuatu.{RESET}"]
+    room = max(20, get_terminal_width() - 4)
+    digits = len(str(len(notes)))
+    lines = []
+    for number, (stamp, note) in enumerate(notes, 1):
+        head = f"{number:>{digits}}. "
+        pad = " " * len(head)
+        wrapped = wrap_text_display_width(note, max(10, room - len(head))) or [""]
+        lines.append(f"  {COLOR_LYRA}{head}{RESET}{wrapped[0]}")
+        lines.extend(f"  {pad}{row}" for row in wrapped[1:])
+        if stamp:
+            lines.append(f"  {pad}{COLOR_DIM}{stamp}{RESET}")
+    return notes, lines
+
 def handle_memory_command():
-    """Interaktif pengelola memori Amagi AI."""
-    print(f"\n  {BOLD}{COLOR_LYRA}🧠 Memori Jangka Panjang Amagi AI (~/.amagi_memory.md){RESET}\n")
-    current_mem = read_memory()
-    print(f"  {DIM}--- Isi Memori Saat Ini ---{RESET}")
-    print(current_mem.strip() if current_mem.strip() else f"  {DIM}(Memori masih kosong){RESET}")
-    print(f"  {DIM}---------------------------{RESET}")
-    picked = pick_option("Kelola memori", [("Tambah catatan baru", ""), ("Reset / bersihkan memori", ""), ("Kembali", "")])
+    """Pengelola memori: isi ditampilkan di dalam menu dan hilang bersama menu saat ditutup."""
+    notes, body = memory_body(read_memory())
+    subtitle = f"{len(notes)} catatan · ~/.amagi_memory.md" if notes else "~/.amagi_memory.md"
+    picked = pick_option("Memori jangka panjang", [("Tambah catatan baru", ""), ("Hapus semua memori", ""), ("Tutup", "")],
+                         subtitle=subtitle, body=body)
     try:
         if picked == 0:
             note = input(f"  {BOLD}{COLOR_USER}Catatan/Fakta baru ❯{RESET} ").strip()
@@ -399,18 +449,16 @@ def handle_memory_command():
 
 def handle_time_command():
     """Menampilkan tanggal, waktu, dan timezone laptop pengguna."""
-    print(f"\n  {BOLD}{COLOR_LYRA}⏰ Waktu Sistem Laptop Pengguna{RESET}\n")
-    print(f"  {get_system_time()}\n")
+    print(f"  {BOLD}Waktu sistem{RESET}")
+    print(f"  {get_system_time()}")
 
 def handle_reminder_command():
     """Interaktif pengelola pengingat & notifikasi desktop."""
-    print(f"\n  {BOLD}{COLOR_LYRA}🔔 Pengingat & Notifikasi Laptop Amagi AI{RESET}")
-    daemon_st = f"{GREEN}Aktif (Background Running){RESET}" if is_daemon_running() else f"{YELLOW}Mati (akan menyala otomatis){RESET}"
-    print(f"  {DIM}Status Daemon Background: {daemon_st}{RESET}\n")
-
-    print(tool_list_reminders())
-    picked = pick_option("Kelola pengingat", [("Buat pengingat baru", ""), ("Batalkan pengingat", ""),
-                                              ("Pastikan daemon background aktif", ""), ("Kembali", "")])
+    daemon_st = f"{GREEN}aktif{RESET}" if is_daemon_running() else f"{YELLOW}mati (menyala otomatis saat dibutuhkan){RESET}"
+    body = [f"  {COLOR_DIM}Daemon background:{RESET} {daemon_st}", ""]
+    body += [f"  {row}" for row in tool_list_reminders().split("\n")]
+    picked = pick_option("Pengingat", [("Buat pengingat baru", ""), ("Batalkan pengingat", ""),
+                                       ("Pastikan daemon background aktif", ""), ("Tutup", "")], body=body)
     try:
         if picked == 0:
             msg = input(f"  {BOLD}{COLOR_USER}Pesan pengingat ❯{RESET} ").strip()
@@ -1040,6 +1088,11 @@ def handle_resume_command(user_input, active_cwd):
           + (f"; dibuat di {short_path(data['cwd'])}, folder aktif tidak berubah" if other else "") + f"{RESET}\n")
     return data
 
+def _tailwind_choice_applies(ptype):
+    import tools as _tools
+    return _tools.normalize_project_type(ptype) in _tools.TAILWIND_KINDS
+
+
 def _validate_project(ptype, pname):
     import tools as _tools
     return _tools.validate_project_name(ptype, pname) if _tools.normalize_project_type(ptype) else None
@@ -1068,6 +1121,13 @@ def handle_project_command(cwd):
         pname  = input(f"  {BOLD}{COLOR_USER}Nama project ❯{RESET} ").strip()
         pdir_input = input(f"  {BOLD}{COLOR_USER}Direktori tujuan (kosong = cwd) ❯{RESET} ").strip()
         target = pdir_input if pdir_input else cwd
+        tailwind = None
+        if ptype and pname and _tailwind_choice_applies(ptype):
+            ask = pick_option("Pasang Tailwind CSS?", [("Ya", "dipasang dan dikonfigurasi otomatis"), ("Tidak", "")], 0)
+            if ask is None:
+                print(f"  {DIM}Dibatalkan.{RESET}\n")
+                return
+            tailwind = ask == 0
         if not ptype or not pname:
             print(f"  {RED}Tipe dan nama project tidak boleh kosong.{RESET}\n")
             return
@@ -1077,7 +1137,7 @@ def handle_project_command(cwd):
             return
 
         print(f"\n  {DIM}Memulai scaffolding {ptype} project '{pname}' di {target}...{RESET}\n")
-        result = init_project(ptype, pname, target_dir=target)
+        result = init_project(ptype, pname, target_dir=target) if tailwind is None else init_project(ptype, pname, target_dir=target, tailwind=tailwind)
         print(f"\n  {GREEN}Hasil:{RESET}\n{result}\n")
     except (EOFError, KeyboardInterrupt):
         print(f"\n  {DIM}Dibatalkan.{RESET}\n")
@@ -1380,7 +1440,7 @@ def _run_session(live=None):
                 continue
 
             elif user_input.lower().split()[0] == "/instruksi":
-                handle_instructions_command(active_cwd)
+                info_panel("", handle_instructions_command, active_cwd)
                 continue
 
             elif user_input.lower().split()[0] == "/init":
@@ -1407,11 +1467,11 @@ def _run_session(live=None):
                 continue
 
             elif user_input.lower() == "/status":
-                handle_status_command(config, model_idx, active_cwd, messages, todo_list)
+                info_panel("", handle_status_command, config, model_idx, active_cwd, messages, todo_list)
                 continue
 
             elif user_input.lower() in ("/todos", "/todo"):
-                handle_todos_command(todo_list)
+                info_panel("", handle_todos_command, todo_list)
                 continue
 
             elif user_input.lower() == '/details':
@@ -1433,7 +1493,7 @@ def _run_session(live=None):
                 continue
 
             elif user_input.lower() in ("/time", "/jam", "/tanggal"):
-                handle_time_command()
+                info_panel("", handle_time_command)
                 continue
 
             elif user_input.lower() in ("/reminder", "/remind", "/alarm"):
@@ -1516,7 +1576,7 @@ def _run_session(live=None):
                 continue
 
             elif user_input.lower() in ("/kuota", "/quota"):
-                show_quota(config)
+                info_panel("", show_quota, config)
                 continue
 
             elif user_input.lower() == "/reset-key":
@@ -1639,6 +1699,7 @@ def _run_session(live=None):
                             args.get("project_type", ""),
                             args.get("project_name", "project"),
                             args.get("target_dir", active_cwd),
+                            tailwind=args.get("tailwind"),
                         )
                     elif func_name == "save_memory":
                         result = tool_save_memory(args.get("content", ""), mode=args.get("mode", "append"))

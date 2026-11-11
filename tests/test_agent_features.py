@@ -572,7 +572,7 @@ class ArrowMenuTests(unittest.TestCase):
 
     def test_model_menu_saves_choice_and_shows_current(self):
         seen = {}
-        def fake(title, options, selected, subtitle=''):
+        def fake(title, options, selected, subtitle='', **kw):
             seen.update(title=title, options=options, selected=selected)
             return 1
         saved = []
@@ -595,7 +595,7 @@ class ArrowMenuTests(unittest.TestCase):
 
     def test_reasoning_menu_preselects_current_effort_and_saves(self):
         calls = []
-        def fake(title, options, selected, subtitle=''):
+        def fake(title, options, selected, subtitle='', **kw):
             calls.append(selected)
             return 0
         config = {'reasoning_effort': 'medium'}
@@ -615,10 +615,10 @@ class ArrowMenuTests(unittest.TestCase):
             self.assertEqual(app.handle_model_command({'model_index': 0}), 2)
 
     def test_project_menu_picks_type_then_asks_name_and_folder(self):
-        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=7), \
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', side_effect=[7, 1]), \
              patch('builtins.input', side_effect=['demo', '']), patch.object(app, 'init_project', return_value='ok') as init:
             app.handle_project_command('/work')
-        init.assert_called_once_with('django', 'demo', target_dir='/work')
+        init.assert_called_once_with('django', 'demo', target_dir='/work', tailwind=False)
 
     def test_memory_and_reminder_menus_use_the_same_picker(self):
         with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=0), \

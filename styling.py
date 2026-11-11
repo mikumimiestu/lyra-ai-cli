@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 
 # ─── Enable ANSI color support on Windows Console ────────────────────────────
 if sys.platform == "win32":
@@ -298,24 +299,69 @@ def render_box(lines, width, color=None, title=''):
     return out
 
 
-def render_permission_box(title, details):
+HEREDOC_START = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+COMMAND_ROWS = 10          # longest command shown in full in a confirmation
+HEREDOC_PREVIEW = 3        # lines of an inline file body shown before "… +N baris"
+
+
+def command_preview(command, width, full=False):
+    """(rows, truncated) for a command: wrapped lines, with long inline file bodies (cat <<EOF) and very long
+    scripts folded. The command lines themselves, and everything after a body, always stay visible."""
+    lines = [line for line in str(command).split('\n')]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    rows, truncated, index = [], False, 0
+    while index < len(lines):
+        line = lines[index]
+        rows.append(('cmd', line))
+        index += 1
+        found = HEREDOC_START.search(line)
+        if not found:
+            continue
+        marker = found.group(2)
+        end = next((j for j in range(index, len(lines)) if lines[j].strip() == marker), len(lines))
+        body = lines[index:end]
+        if full or len(body) <= HEREDOC_PREVIEW + 1:
+            rows.extend(('cmd', b) for b in body)
+        else:
+            rows.extend(('cmd', b) for b in body[:HEREDOC_PREVIEW])
+            rows.append(('more', f'… +{len(body) - HEREDOC_PREVIEW} baris isi file'))
+            truncated = True
+        index = end
+    out = []
+    for kind, text in rows:
+        if kind == 'more':
+            out.append(('more', text))
+        else:
+            out.extend(('cmd', piece) for piece in wrap_text_display_width(text, width) or [''])
+    if not full and len(out) > COMMAND_ROWS + HEREDOC_PREVIEW:
+        hidden = len(out) - 8
+        out = out[:6] + [('more', f'… +{hidden} baris')] + out[-2:]
+        truncated = True
+    return out, truncated
+
+
+def render_permission_box(title, details, full=False):
     """Compact confirmation, a few lines instead of a framed box.
 
-    A command is always shown in full (never approve what you cannot read), next to a bar. Everything
-    else (folder, limits, sizes) is folded into one dim line.
+    A command is shown next to a bar. Long inline file bodies and very long scripts are folded (the command
+    itself and anything after a body stay visible); `full=True` shows everything. Returns True when something
+    was folded so the caller can offer "v" to view it all. Everything else (folder, limits, sizes) is one dim line.
     """
     width = max(30, get_terminal_width() - 6)
     heading = title[len('Konfirmasi '):] if title.startswith('Konfirmasi ') else title
     bar = f"{YELLOW}{ui_symbol('│', '|')}{RESET}"
+    folded = False
     print()
     print(f"  {BOLD}{YELLOW}{ui_symbol('⚠', '!')} {heading}{RESET}")
     info, warnings = [], []
     for key, value in details.items():
         text = str(value)
         if key == 'Perintah':
-            for chunk in [part for part in text.split('\n') if part.strip()] or ['']:
-                for piece in wrap_text_display_width(chunk, width):
-                    print(f"    {bar} {highlight_syntax(piece)}")
+            rows, cut = command_preview(text, width, full)
+            folded = folded or cut
+            for kind, piece in rows:
+                print(f"    {bar} " + (f"{COLOR_DIM}{piece}{RESET}" if kind == 'more' else highlight_syntax(piece)))
         elif key == 'Direktori':
             info.append('di ' + short_path(text))
         elif key == 'Timeout':
@@ -339,6 +385,7 @@ def render_permission_box(title, details):
     for text in warnings:
         for piece in wrap_text_display_width(text, width):
             print(f"    {YELLOW}{ui_symbol('⚠', '!')} {piece}{RESET}")
+    return folded
 
 
 # ─── Markdown Renderer & Code Highlighting ────────────────────────────────────
@@ -1113,15 +1160,42 @@ NOT_INTERACTIVE = object()   # returned by choose() when there is no real termin
 TERMINAL_RUNNER = None   # set by the live console: runs blocking terminal code with the live area suspended
 
 
-def choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False):
+def choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False, body=None):
     """Arrow-key menu (see _choose). Inside the live console the live area is suspended while it shows."""
     runner = TERMINAL_RUNNER
     if runner is not None and input_stream is None and output_stream is None and not force:
-        return runner(lambda: _choose(title, options, selected, subtitle))
-    return _choose(title, options, selected, subtitle, input_stream, output_stream, force)
+        return runner(lambda: _choose(title, options, selected, subtitle, body=body))
+    return _choose(title, options, selected, subtitle, input_stream, output_stream, force, body=body)
 
 
-def _choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False):
+def _screen_rows():
+    try:
+        return os.get_terminal_size().lines
+    except (OSError, ValueError):
+        return 24
+
+
+def _display_rows(line, width):
+    """Screen rows one (ANSI-styled) line takes once the terminal wraps it."""
+    return max(1, -(-str_width(strip_ansi(line)) // max(1, width)))
+
+
+def _fit_body(lines, spare):
+    """Trim pre-formatted lines so the whole panel fits on screen; says how many were left out."""
+    width = max(20, get_terminal_width() - 1)
+    room = max(3, _screen_rows() - spare)
+    out, used = [], 0
+    for index, line in enumerate(lines):
+        need = _display_rows(line, width)
+        if used + need > room - (1 if index < len(lines) - 1 else 0):
+            out.append(f'  {COLOR_DIM}… {len(lines) - index} baris lagi{RESET}')
+            break
+        out.append(line)
+        used += need
+    return out
+
+
+def _choose(title, options, selected=0, subtitle='', input_stream=None, output_stream=None, force=False, body=None):
     """Arrow-key menu. `options` is a list of (label, description).
 
     Returns the chosen index, None when cancelled (Esc, q, Ctrl+C), or NOT_INTERACTIVE when stdin or
@@ -1137,6 +1211,7 @@ def _choose(title, options, selected=0, subtitle='', input_stream=None, output_s
 
     count = len(options)
     state = {'index': max(0, min(int(selected), count - 1))}
+    body_lines = _fit_body(list(body), count + 6 + (1 if subtitle else 0)) if body else []
 
     def render():
         room = max(20, get_terminal_width() - 4)
@@ -1144,6 +1219,9 @@ def _choose(title, options, selected=0, subtitle='', input_stream=None, output_s
         if subtitle:
             rows.append(f'  {COLOR_DIM}{fit_console_text(subtitle, room)}{RESET}')
         rows.append('')
+        if body_lines:
+            rows.extend(body_lines)
+            rows.append('')
         label_w = max(str_width(label) for label, _ in options)
         for number, (label, description) in enumerate(options):
             active = number == state['index']
@@ -1184,6 +1262,54 @@ def _choose(title, options, selected=0, subtitle='', input_stream=None, output_s
         @bindings.add(str(digit))
         def pick(event, digit=digit):
             event.app.exit(result=digit - 1)
+
+    application = Application(layout=Layout(Window(FormattedTextControl(render), dont_extend_height=True)),
+                              key_bindings=bindings, full_screen=False, erase_when_done=True,
+                              input=input_stream, output=output_stream)
+    return application.run()
+
+
+def show_panel(lines, title='', input_stream=None, output_stream=None, force=False):
+    """Read-only panel, closed with Enter, Esc, q or space. Leaves no trace on the screen once closed.
+
+    Returns True after showing it, or NOT_INTERACTIVE when there is no terminal (the caller prints instead).
+    """
+    runner = TERMINAL_RUNNER
+    if runner is not None and input_stream is None and output_stream is None and not force:
+        return runner(lambda: _panel(lines, title))
+    return _panel(lines, title, input_stream, output_stream, force)
+
+
+def _panel(lines, title='', input_stream=None, output_stream=None, force=False):
+    interactive = EDITOR_AVAILABLE and (force or (sys.stdin.isatty() and sys.stdout.isatty()
+                                                  and os.environ.get('TERM') != 'dumb'))
+    if not interactive:
+        return NOT_INTERACTIVE
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.layout import Layout
+    from prompt_toolkit.layout.controls import FormattedTextControl
+
+    shown = _fit_body(list(lines), 4 + (1 if title else 0))
+
+    def render():
+        rows = []
+        if title:
+            rows.append(f'  {BOLD}{COLOR_LYRA}{title}{RESET}')
+        rows.extend(shown)
+        rows.append('')
+        rows.append(f'  {COLOR_DIM}Enter / Esc untuk menutup{RESET}')
+        return ANSI('\n'.join(rows))
+
+    bindings = KeyBindings()
+
+    @bindings.add('enter')
+    @bindings.add('escape', eager=True)
+    @bindings.add('q')
+    @bindings.add(' ')
+    @bindings.add('c-c')
+    @bindings.add('c-d')
+    def close(event):
+        event.app.exit(result=True)
 
     application = Application(layout=Layout(Window(FormattedTextControl(render), dont_extend_height=True)),
                               key_bindings=bindings, full_screen=False, erase_when_done=True,
@@ -1235,6 +1361,11 @@ def tool_call_parts(name, arguments):
     value = str(arguments.get(key, '')) if key else ''
     if name == 'search' and not value:
         value = str(arguments.get('glob', ''))
+    if name == 'execute_command':
+        written = re.match(r"\s*(?:cat|tee)\s+(?:>>?\s*)?([^\s<>|;&]+)[^\n]*<<", value) or re.match(r"\s*cat\s*>>?\s*([^\s<>|;&]+)\s*<<", value)
+        if written:
+            return 'Tulis (shell)', written.group(1)[:90]
+        value = value.split('\n', 1)[0] + (' …' if '\n' in value.strip() else '')
     # Keep paths and multiline scripts from injecting control sequences in labels.
     value = ''.join(char if char.isprintable() else ' ' for char in value)
     return label, value[:90] + ('…' if len(value) > 90 else '')

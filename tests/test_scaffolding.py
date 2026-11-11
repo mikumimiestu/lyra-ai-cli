@@ -21,7 +21,7 @@ def fake_runner(calls, fail_on=None, create=None):
     return run
 
 
-class ScaffoldingTests(unittest.TestCase):
+class ScaffoldBase(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix='lyra-scaffold-')
         stack = contextlib.ExitStack()
@@ -33,6 +33,9 @@ class ScaffoldingTests(unittest.TestCase):
     def make(self, kind, name, runner=None, **kw):
         with patch.object(tools, '_run_step', runner or fake_runner([])):
             return tools.init_project(kind, name, target_dir=self.dir, **kw)
+
+
+class ScaffoldingTests(ScaffoldBase):
 
     def test_injection_names_rejected_before_anything_runs(self):
         for bad in ['a; rm -rf ~', 'a b', '$(id)', '../x', '-rf', '', 'a&&b', 'x' * 80]:
@@ -127,6 +130,118 @@ class ScaffoldingTests(unittest.TestCase):
         calls = []
         self.make('laravel', 'blog', fake_runner(calls))
         self.assertIn('laravel/laravel', calls[0][0])
+
+
+VITE_REACT = """import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+"""
+
+
+class TailwindTests(ScaffoldBase):
+    def read(self, *parts):
+        return open(os.path.join(self.dir, *parts), encoding='utf-8').read()
+
+    def vite_runner(self, calls, config=VITE_REACT, css='src/index.css'):
+        def run(args, cwd, timeout):
+            calls.append((list(args), cwd))
+            if 'create-vite@latest' in args:
+                root = os.path.join(cwd, args[args.index('create-vite@latest') + 1])
+                os.makedirs(os.path.join(root, 'src'))
+                open(os.path.join(root, 'package.json'), 'w').close()
+                open(os.path.join(root, 'vite.config.ts'), 'w').write(config)
+                open(os.path.join(root, *css.split('/')), 'w').write('body { margin: 0 }\n')
+            return 0, ''
+        return run
+
+    def test_vite_react_gets_plugin_import_and_css(self):
+        calls = []
+        result = self.make('react', 'app1', self.vite_runner(calls), tailwind=True)
+        self.assertTrue(result.startswith('✅'), result)
+        self.assertIn('Tailwind CSS v4 dipasang', result)
+        self.assertEqual(calls[2][0][1:4], ['install', 'tailwindcss', '@tailwindcss/vite'])
+        config = self.read('app1', 'vite.config.ts')
+        self.assertIn("import tailwindcss from '@tailwindcss/vite'", config)
+        self.assertIn('tailwindcss(),', config)
+        self.assertIn('react()', config)
+        self.assertEqual(self.read('app1', 'src', 'index.css'), '@import "tailwindcss";\n')
+        self.assertIn('Tailwind CSS', self.confirm.call_args[0][1])
+
+    def test_vite_patch_is_idempotent_and_handles_missing_plugins(self):
+        calls = []
+        self.make('vue', 'app2', self.vite_runner(calls, "import { defineConfig } from 'vite'\nexport default defineConfig({})\n", 'src/style.css'), tailwind=True)
+        config = self.read('app2', 'vite.config.ts')
+        self.assertIn('plugins: [tailwindcss()]', config)
+        before = config
+        self.assertIsNone(tools._patch_vite_config(os.path.join(self.dir, 'app2')))
+        self.assertEqual(self.read('app2', 'vite.config.ts'), before)
+
+    def test_unrecognised_vite_config_warns_instead_of_failing(self):
+        calls = []
+        result = self.make('svelte', 'app3', self.vite_runner(calls, 'module.exports = {}\n', 'src/app.css'), tailwind=True)
+        self.assertTrue(result.startswith('✅'), result)
+        self.assertIn('Perlu dicek', result)
+
+    def test_no_tailwind_leaves_vite_untouched(self):
+        calls = []
+        self.make('react', 'app4', self.vite_runner(calls), tailwind=False)
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn('tailwind', self.read('app4', 'vite.config.ts'))
+
+    def test_next_flag_follows_choice(self):
+        calls = []
+        self.make('next', 'n1', fake_runner(calls), tailwind=False)
+        self.assertIn('--no-tailwind', calls[0][0])
+        calls = []
+        self.make('next', 'n2', fake_runner(calls))
+        self.assertIn('--tailwind', calls[0][0])
+
+    def test_flask_php_django_use_tailwind_cli(self):
+        for kind, css in [('flask', ('app', 'static', 'src', 'input.css')), ('php', ('src', 'input.css'))]:
+            calls = []
+            result = self.make(kind, 't_' + kind, fake_runner(calls), tailwind=True)
+            self.assertTrue(result.startswith('✅'), result)
+            self.assertEqual(self.read('t_' + kind, *css), '@import "tailwindcss";\n')
+            self.assertEqual([c[0][1] for c in calls], ['install', 'run'])
+            self.assertIn('@tailwindcss/cli', calls[0][0])
+        self.assertIn('tailwind.css', self.read('t_flask', 'app', 'templates', 'base.html'))
+        self.assertIn('/css/tailwind.css', self.read('t_php', 'views', 'layouts', 'main.php'))
+
+    def test_django_tailwind_patches_settings_and_urls(self):
+        calls = []
+        def runner(args, cwd, timeout):
+            calls.append(list(args))
+            if 'startproject' in args:
+                os.makedirs(os.path.join(cwd, 'shop'))
+                open(os.path.join(cwd, 'manage.py'), 'w').close()
+                open(os.path.join(cwd, 'shop', 'settings.py'), 'w').write("TEMPLATES = [{\n 'DIRS': [],\n}]\n")
+                open(os.path.join(cwd, 'shop', 'urls.py'), 'w').write("from django.urls import path\nurlpatterns = [\n]\n")
+            return 0, ''
+        result = self.make('django', 'shop', runner, tailwind=True)
+        self.assertTrue(result.startswith('✅'), result)
+        self.assertIn("BASE_DIR / 'templates'", self.read('shop', 'shop', 'settings.py'))
+        self.assertIn('STATICFILES_DIRS', self.read('shop', 'shop', 'settings.py'))
+        self.assertIn('TemplateView', self.read('shop', 'shop', 'urls.py'))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, 'shop', 'templates', 'home.html')))
+        self.assertEqual(calls[-1][1:], ['run', 'build:css'])
+
+    def test_laravel_and_unsupported_kinds_explain(self):
+        def laravel(args, cwd, timeout):
+            os.makedirs(os.path.join(cwd, 'lv'))
+            open(os.path.join(cwd, 'lv', 'artisan'), 'w').close()
+            return 0, ''
+        self.assertIn('sudah memakai Tailwind', self.make('laravel', 'lv', laravel, tailwind=True))
+        self.assertIn('tidak diterapkan', self.make('fastapi', 'fa', fake_runner([]), tailwind=True))
+
+    def test_tailwind_failure_is_reported_but_project_remains(self):
+        calls = []
+        result = self.make('flask', 'tf', fake_runner(calls, fail_on='install'), tailwind=True)
+        self.assertIn('hanya langkah Tailwind yang gagal', result)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, 'tf', 'run.py')))
 
 
 if __name__ == '__main__':

@@ -87,10 +87,16 @@ def _confirm_permission(action_title, details, kind='command'):
             print(f"  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  {GREEN}{ui_symbol('✔', 'OK')} Disetujui otomatis{RESET} "
                   f"{COLOR_DIM}(mode {APPROVAL_LABELS[APPROVAL.mode]}){RESET}\n")
             return True
-        render_permission_box(action_title, details)
-        answer = input(f"  {BOLD}{YELLOW}Izinkan? (y/n) ❯ {RESET}").strip().lower()
-        print()
-        return answer in ('y', 'ya', 'yes')
+        folded = render_permission_box(action_title, details)
+        while True:
+            hint = "y/n/v lihat semua" if folded else "y/n"
+            answer = input(f"  {BOLD}{YELLOW}Izinkan? ({hint}) ❯ {RESET}").strip().lower()
+            if folded and answer in ('v', 'lihat'):
+                render_permission_box(action_title, details, full=True)
+                folded = False
+                continue
+            print()
+            return answer in ('y', 'ya', 'yes')
     except (EOFError, KeyboardInterrupt):
         print()
         return False
@@ -660,9 +666,9 @@ def _fastapi_files(name):
     }
 
 
-def _flask_files(name):
+def _flask_files(name, tailwind=False):
     setup = f"python3 -m venv venv\n{_activate_hint()}\npip install -r requirements.txt"
-    return {
+    files = {
         'app/__init__.py': (
             'from flask import Flask\n\ndef create_app():\n    app = Flask(__name__)\n\n'
             '    from app.routes.main import main\n    app.register_blueprint(main)\n\n    return app\n'),
@@ -677,10 +683,25 @@ def _flask_files(name):
         '.gitignore': "__pycache__/\n*.pyc\n.env\nvenv/\n",
         'README.md': _readme(name, 'A Flask project.', setup=setup, run='python run.py'),
     }
+    if tailwind:
+        files['app/routes/main.py'] = (
+            'from flask import Blueprint, render_template\n\nmain = Blueprint("main", __name__)\n\n'
+            '@main.route("/")\ndef index():\n    return render_template("index.html")\n')
+        files['app/templates/base.html'] = (
+            '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n'
+            '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+            f'  <title>{name}</title>\n'
+            '  <link rel="stylesheet" href="{{ url_for(\'static\', filename=\'css/tailwind.css\') }}">\n</head>\n<body>\n'
+            '  {% block content %}{% endblock %}\n</body>\n</html>\n')
+        files['app/templates/index.html'] = ("{% extends 'base.html' %}\n{% block content %}\n"
+                                             + TAILWIND_PAGE.format(name=name) + "{% endblock %}\n")
+        files['.gitignore'] += "node_modules/\n"
+        files['README.md'] += "\n## Tailwind\n\n```bash\nnpm run watch:css\n```\n"
+    return files
 
 
-def _php_files(name):
-    return {
+def _php_files(name, tailwind=False):
+    files = {
         'public/index.php': '<?php\n\ndefine("ROOT", dirname(__DIR__));\n\nrequire_once ROOT . "/config/app.php";\nrequire_once ROOT . "/routes/web.php";\n',
         'config/app.php': (
             '<?php\n\n// Load .env manually\nif (file_exists(ROOT . "/.env")) {\n'
@@ -705,6 +726,14 @@ def _php_files(name):
         '.gitignore': ".env\nvendor/\n",
         'README.md': _readme(name, 'A PHP Native MVC project.', run='cd public && php -S localhost:8000'),
     }
+    if tailwind:
+        layout = files['views/layouts/main.php']
+        files['views/layouts/main.php'] = layout.replace(
+            '</head>', '  <link rel="stylesheet" href="/css/tailwind.css">\n</head>', 1).replace(
+            '<body>\n  <h1>', '<body class="min-h-screen flex flex-col items-center justify-center gap-2 bg-slate-50">\n  <h1 class="text-3xl font-bold text-slate-800">', 1)
+        files['.gitignore'] += "node_modules/\n"
+        files['README.md'] += "\n## Tailwind\n\n```bash\nnpm run watch:css\n```\n"
+    return files
 
 
 def _django_files(name):
@@ -716,19 +745,128 @@ def _django_files(name):
     }
 
 
-def _plan_project(kind, name, cwd, full_path):
+
+# ─── Tailwind CSS ─────────────────────────────────────────────────────────────
+TAILWIND_KINDS = {'react-ts', 'react-js', 'vue-ts', 'vue-js', 'svelte', 'svelte-ts', 'next', 'next-js',
+                  'django', 'flask', 'php'}
+TAILWIND_BUILTIN = {'laravel'}          # Laravel already ships Tailwind through Vite
+VITE_CSS_CANDIDATES = ('src/index.css', 'src/style.css', 'src/app.css')
+TAILWIND_IMPORT = '@import "tailwindcss";\n'
+
+
+def _patch_vite_config(root):
+    """Register @tailwindcss/vite in vite.config.(ts|js|mjs|mts). Returns a note when it needs the user's attention."""
+    path = next((os.path.join(root, n) for n in ('vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs')
+                 if os.path.exists(os.path.join(root, n))), None)
+    if not path:
+        return "vite.config tidak ditemukan: tambahkan plugin tailwindcss() dari '@tailwindcss/vite' secara manual."
+    text = open(path, encoding='utf-8').read()
+    if '@tailwindcss/vite' in text:
+        return None
+    imports = list(re.finditer(r"^import .*$", text, re.MULTILINE))
+    line = "import tailwindcss from '@tailwindcss/vite'"
+    if imports:
+        end = imports[-1].end()
+        text = text[:end] + "\n" + line + text[end:]
+    else:
+        text = line + "\n" + text
+    if re.search(r"plugins\s*:\s*\[", text):
+        text = re.sub(r"plugins\s*:\s*\[", "plugins: [\n    tailwindcss(),", text, count=1)
+    elif re.search(r"defineConfig\(\s*\{", text):
+        text = re.sub(r"defineConfig\(\s*\{", "defineConfig({\n  plugins: [tailwindcss()],", text, count=1)
+    else:
+        return ("vite.config punya bentuk yang tidak dikenali: tambahkan tailwindcss() ke daftar plugins "
+                "(import dari '@tailwindcss/vite') secara manual.")
+    with open(path, 'w', encoding='utf-8', newline='\n') as handle:
+        handle.write(text)
+    return None
+
+
+def _tailwind_vite_post(root):
+    notes = []
+    note = _patch_vite_config(root)
+    if note:
+        notes.append(note)
+    css = next((c for c in VITE_CSS_CANDIDATES if os.path.exists(os.path.join(root, *c.split('/')))), None)
+    if css:
+        with open(os.path.join(root, *css.split('/')), 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(TAILWIND_IMPORT)
+    else:
+        notes.append('File CSS utama tidak ditemukan: tambahkan @import "tailwindcss"; ke CSS yang diimpor aplikasi.')
+    return "\n".join(notes) or None
+
+
+def _tailwind_cli_files(css_in, css_out):
+    import json
+    scripts = {'build:css': f'tailwindcss -i {css_in} -o {css_out} --minify',
+               'watch:css': f'tailwindcss -i {css_in} -o {css_out} --watch'}
+    return {'package.json': json.dumps({'private': True, 'scripts': scripts}, indent=2) + "\n", css_in: TAILWIND_IMPORT}
+
+
+def _tailwind_cli_steps(root):
+    npm = _find_tool('npm')
+    return [("Memasang Tailwind CSS (npm)", [npm, 'install', '-D', 'tailwindcss', '@tailwindcss/cli', '--no-audit', '--no-fund'], root),
+            ("Membuat CSS Tailwind", [npm, 'run', 'build:css'], root)]
+
+
+TAILWIND_PAGE = ('<main class="min-h-screen flex items-center justify-center bg-slate-50">\n'
+                 '  <h1 class="text-3xl font-bold text-slate-800">Selamat datang di {name}</h1>\n</main>\n')
+
+
+def _tailwind_django_post(name):
+    def patch(root):
+        notes = []
+        _write_files(root, {
+            'templates/base.html': ('<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n'
+                                    '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+                                    f'  <title>{name}</title>\n  {{% load static %}}\n'
+                                    '  <link rel="stylesheet" href="{% static \'css/tailwind.css\' %}">\n</head>\n<body>\n'
+                                    '  {% block content %}{% endblock %}\n</body>\n</html>\n'),
+            'templates/home.html': "{% extends 'base.html' %}\n{% block content %}\n" + TAILWIND_PAGE.format(name=name) + "{% endblock %}\n",
+        })
+        settings_path = os.path.join(root, name, 'settings.py')
+        urls_path = os.path.join(root, name, 'urls.py')
+        try:
+            text = open(settings_path, encoding='utf-8').read()
+            if "'DIRS': []," in text:
+                text = text.replace("'DIRS': [],", "'DIRS': [BASE_DIR / 'templates'],", 1)
+            else:
+                notes.append("Tambahkan BASE_DIR / 'templates' ke TEMPLATES['DIRS'] di settings.py.")
+            if 'STATICFILES_DIRS' not in text:
+                text += "\nSTATICFILES_DIRS = [BASE_DIR / 'static']\n"
+            with open(settings_path, 'w', encoding='utf-8', newline='\n') as handle:
+                handle.write(text)
+            text = open(urls_path, encoding='utf-8').read()
+            if 'from django.urls import path' in text and 'urlpatterns = [' in text:
+                text = text.replace('from django.urls import path', 'from django.urls import path\nfrom django.views.generic import TemplateView', 1)
+                text = text.replace('urlpatterns = [', "urlpatterns = [\n    path('', TemplateView.as_view(template_name='home.html'), name='home'),", 1)
+                with open(urls_path, 'w', encoding='utf-8', newline='\n') as handle:
+                    handle.write(text)
+            else:
+                notes.append("Tambahkan route ke 'home.html' di urls.py secara manual.")
+        except (OSError, UnicodeError) as error:
+            notes.append(f"settings.py/urls.py tidak bisa disesuaikan otomatis ({error}).")
+        return "\n".join(notes) or None
+    return patch
+
+
+def _plan_project(kind, name, cwd, full_path, tailwind=False):
     """What to do for this project: files before, commands, files after, files that must exist, next steps."""
     npm, npx = _find_tool('npm'), _find_tool('npx')
-    plan = {'before': {}, 'steps': [], 'after': {}, 'verify': [], 'make_folder': False, 'next': []}
+    plan = {'before': {}, 'steps': [], 'after': {}, 'verify': [], 'make_folder': False, 'next': [], 'post': [],
+            'late_steps': [], 'notes': []}
     if kind in VITE_TEMPLATES:
         plan['steps'] = [("Membuat project (create-vite)", [npx, '-y', 'create-vite@latest', name, '--template', VITE_TEMPLATES[kind]], cwd),
                          ("Memasang dependency (npm install)", [npm, 'install', '--no-audit', '--no-fund'], full_path)]
         plan['verify'] = ['package.json']
         plan['next'] = [f"cd {name}", "npm run dev"]
+        if tailwind:
+            plan['steps'].append(("Memasang Tailwind CSS (npm)", [npm, 'install', 'tailwindcss', '@tailwindcss/vite', '--no-audit', '--no-fund'], full_path))
+            plan['post'].append(_tailwind_vite_post)
     elif kind in ('next', 'next-js'):
         plan['steps'] = [("Membuat project (create-next-app)",
                           [npx, '-y', 'create-next-app@latest', name, '--yes', '--js' if kind == 'next-js' else '--ts',
-                           '--tailwind', '--eslint', '--app', '--src-dir', '--import-alias', '@/*', '--use-npm',
+                           '--tailwind' if tailwind else '--no-tailwind', '--eslint', '--app', '--src-dir', '--import-alias', '@/*', '--use-npm',
                            '--disable-git'], cwd)]
         plan['verify'] = ['package.json']
         plan['next'] = [f"cd {name}", "npm run dev"]
@@ -750,11 +888,17 @@ def _plan_project(kind, name, cwd, full_path):
         plan['next'] = [f"cd {name}", f"python3 -m venv venv && {_activate_hint()}", "pip install -r requirements.txt", "uvicorn app.main:app --reload"]
     elif kind == 'flask':
         plan['make_folder'] = True
-        plan['before'] = _flask_files(name)
+        plan['before'] = _flask_files(name, tailwind)
+        if tailwind:
+            plan['before'].update(_tailwind_cli_files('app/static/src/input.css', 'app/static/css/tailwind.css'))
+            plan['late_steps'] = _tailwind_cli_steps(full_path)
         plan['next'] = [f"cd {name}", f"python3 -m venv venv && {_activate_hint()}", "pip install -r requirements.txt", "python run.py"]
     elif kind == 'php':
         plan['make_folder'] = True
-        plan['before'] = _php_files(name)
+        plan['before'] = _php_files(name, tailwind)
+        if tailwind:
+            plan['before'].update(_tailwind_cli_files('src/input.css', 'public/css/tailwind.css'))
+            plan['late_steps'] = _tailwind_cli_steps(full_path)
         plan['next'] = [f"cd {name}/public && php -S localhost:8000"]
     elif kind == 'django':
         python = _find_tool('python')
@@ -765,9 +909,14 @@ def _plan_project(kind, name, cwd, full_path):
                          ("Membuat project Django", [venv_python, '-m', 'django', 'startproject', name, '.'], full_path),
                          ("Menjalankan migrasi awal", [venv_python, 'manage.py', 'migrate'], full_path)]
         plan['after'] = _django_files(name)
+        if tailwind:
+            plan['after'].update(_tailwind_cli_files('static/src/input.css', 'static/css/tailwind.css'))
+            plan['post'].append(_tailwind_django_post(name))
+            plan['late_steps'] = _tailwind_cli_steps(full_path)
         plan['verify'] = ['manage.py']
         plan['next'] = [f"cd {name}", _activate_hint(), "python manage.py runserver"]
     elif kind == 'laravel':
+        plan['notes'].append("Laravel sudah memakai Tailwind CSS bawaan (lewat Vite), jadi tidak perlu dipasang lagi.")
         plan['steps'] = [("Membuat project (composer create-project)",
                           [_find_tool('composer'), 'create-project', '--prefer-dist', '--no-interaction', 'laravel/laravel', name], cwd)]
         plan['verify'] = ['artisan']
@@ -784,7 +933,7 @@ def _tail(text, lines=25):
     return "\n".join(rows[-lines:])
 
 
-def init_project(project_type, project_name, target_dir=None):
+def init_project(project_type, project_name, target_dir=None, tailwind=None):
     """Create a new project (React/Vue/Svelte via Vite, Next.js, Node, Express, FastAPI, Django, Flask, Laravel,
     PHP, Flutter) without ever waiting for input. Returns a result text; never raises for ordinary failures."""
     kind = normalize_project_type(project_type)
@@ -809,11 +958,23 @@ def init_project(project_type, project_name, target_dir=None):
         return (f"❌ '{full_path}' sudah ada dan tidak kosong. Pilih nama lain atau hapus folder itu dulu "
                 f"supaya tidak ada file yang tertimpa.")
 
-    plan = _plan_project(kind, name, cwd, full_path)
+    if tailwind is None:
+        tailwind = kind in ('next', 'next-js')          # create-next-app always shipped Tailwind in earlier versions
+    tailwind = bool(tailwind)
+    unsupported = tailwind and kind not in TAILWIND_KINDS and kind not in TAILWIND_BUILTIN
+    tailwind = tailwind and kind in TAILWIND_KINDS
+    plan = _plan_project(kind, name, cwd, full_path, tailwind)
+    if unsupported:
+        plan['notes'].append(f"Tailwind CSS tidak diterapkan otomatis untuk project {kind}.")
+    if kind in TAILWIND_KINDS:
+        plan['notes'].append("Tailwind CSS v4 " + ("dipasang dan dikonfigurasi otomatis." if tailwind else "tidak dipasang."))
     details = {"Tipe Project": kind, "Nama": name, "Target Path": full_path}
-    if plan['steps']:
-        details["Perintah"] = "\n".join(_display_command(args) for _, args, _ in plan['steps'])
-    if not _confirm_permission("Inisialisasi Project Baru", details, kind="command" if plan['steps'] else "edit"):
+    if tailwind:
+        details["Tailwind CSS"] = "ya, dipasang dan dikonfigurasi otomatis"
+    commands = plan['steps'] + plan['late_steps']
+    if commands:
+        details["Perintah"] = "\n".join(_display_command(args) for _, args, _ in commands)
+    if not _confirm_permission("Inisialisasi Project Baru", details, kind="command" if commands else "edit"):
         return "Inisialisasi project dibatalkan oleh pengguna."
 
     spinner = Spinner(f"Menyiapkan project {kind} '{name}'...")
@@ -831,11 +992,23 @@ def init_project(project_type, project_name, target_dir=None):
                         f"Perintah: {_display_command(args)}\n"
                         f"Folder '{name}' mungkin setengah jadi; hapus lalu ulangi bila perlu.")
         _write_files(full_path, plan['after'])
+        for patch in plan['post']:
+            note = patch(full_path)
+            if note:
+                plan['notes'].append("Perlu dicek: " + note)
+        for label, args, step_cwd in plan['late_steps']:
+            spinner.set_message(label + "...")
+            code, output = _run_step(args, step_cwd, DEFAULT_TIMEOUT)
+            if code != 0:
+                return (f"❌ Gagal pada langkah: {label} (kode keluar {code})\n{_tail(output)}\n\n"
+                        f"Perintah: {_display_command(args)}\n"
+                        f"Project sudah dibuat di '{full_path}', hanya langkah Tailwind yang gagal; ulangi perintah itu di folder project.")
         absent = [f for f in plan['verify'] if not os.path.exists(os.path.join(full_path, f))]
         if absent:
             return (f"❌ Perintah selesai tetapi {', '.join(absent)} tidak ditemukan di '{full_path}', "
                     f"jadi project belum terbentuk dengan benar.")
-        return f"✅ Project {kind} '{name}' berhasil dibuat di {full_path}\n   " + "\n   ".join(plan['next'])
+        extra = "".join(f"\n   ℹ {note}" for note in plan['notes'])
+        return f"✅ Project {kind} '{name}' berhasil dibuat di {full_path}{extra}\n   " + "\n   ".join(plan['next'])
     except Exception as e:
         if isinstance(e, KeyboardInterrupt):
             raise
