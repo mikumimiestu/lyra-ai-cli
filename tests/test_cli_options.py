@@ -390,7 +390,9 @@ class HelpTopicTests(unittest.TestCase):
         completer = styling.WorkspaceCompleter(lambda: '.')
         names = [c.text for c in completer.get_completions(Document('/help mo'), None)]
         self.assertEqual(sorted(names), ['mode', 'model'])
-        self.assertEqual([c.text for c in completer.get_completions(Document('/help '), None)][:1], ['undo'])
+        everything = [c.text for c in completer.get_completions(Document('/help '), None)]
+        self.assertIn('undo', everything)
+        self.assertIn('init', everything)
         self.assertEqual(list(completer.get_completions(Document('/help mode x'), None)), [])
 
 

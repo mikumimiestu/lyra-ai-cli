@@ -1,7 +1,9 @@
 # Amagi CLI - AI Terminal Client & Agent
 
+[![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
+
 ```text
-  [kucing pixel art Nexara]    Lyra CLI  v2.12.3
+  [kucing pixel art Nexara]    Lyra CLI  v2.12.4
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -27,6 +29,22 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.4 — Panduan project, markdown lebih lengkap, dan CI
+
+**`LYRA.md`: panduan untuk project kamu**
+- Taruh `LYRA.md` di folder project berisi hal yang ingin Lyra ingat: tujuan project, perintah tes dan build, konvensi kode, serta hal yang tidak boleh diubah. Lyra membacanya otomatis pada setiap pesan, jadi kamu tidak perlu mengulang konteks tiap sesi.
+- **`/init`** meminta Lyra mempelajari project (struktur folder, README, file manifest) lalu menulis `LYRA.md` untukmu. Kalau file sudah ada, Lyra memeriksa dan memperbaruinya. Penulisan tetap lewat diff dan izin seperti biasa.
+- **`/instruksi`** menampilkan file yang sedang dimuat beserta ukurannya. Saat sebuah `LYRA.md` dimuat atau berubah, muncul satu baris pemberitahuan.
+- `LYRA.md` dicari dari folder kerja naik ke atas sampai root repositori (folder yang berisi `.git`), atau sampai folder home bila tidak ada repositori. File yang paling dekat diutamakan. `~/LYRA.md` bisa dipakai untuk preferensi pribadi.
+- **Batas dan keamanan:** maksimal 20 KB per file, 40 KB total, dan 4 file. File biner dan symlink yang mengarah keluar dari project diabaikan, dan folder di luar repositori atau home tidak pernah dibaca. Isinya ikut dikirim ke API Lyra, jadi jangan menaruh rahasia di dalamnya. Aturan konfirmasi dan pengaman perintah berbahaya tetap berlaku di atas instruksi apa pun.
+
+**Markdown lebih lengkap**
+- Tautan `[teks](url)` tampil sebagai teks bergaris bawah diikuti `(url)`, gambar sebagai `[gambar: alt]`, dan tautan di dalam tabel ikut dirender.
+- `~~coret~~` benar-benar tercoret, `- [ ]` dan `- [x]` menjadi kotak centang ☐ dan ☒ tanpa butir, kutipan bersarang (`> >`) memakai satu garis per tingkat, dan daftar yang menjorok dalam tetap dikenali sebagai daftar.
+
+**CI di GitHub**
+- Workflow `.github/workflows/ci.yml` menjalankan semua tes di macOS, Linux, dan Windows (Python 3.9, 3.11, dan 3.13), memeriksa sintaksis Python 3.7, dan menguji `install.sh`, `install.ps1`, serta paket pip dari awal sampai perintah `amagi --version` berjalan. Hasil Windows ditampilkan tetapi belum membuat CI gagal sampai beberapa putaran pertama menunjukkan apa yang perlu dirapikan.
 
 ### Perbaikan v2.12.3
 
@@ -247,6 +265,8 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | Perintah | Deskripsi |
 | :--- | :--- |
 | `/status` | Ringkasan sesi: versi, model, direktori, konteks, persetujuan, daemon |
+| `/init` | Minta Lyra mempelajari project dan menulis atau memperbarui `LYRA.md` |
+| `/instruksi` | Lihat `LYRA.md` yang sedang dimuat |
 | `/undo [list]` | Urungkan perubahan file terakhir dari Lyra, atau lihat daftarnya |
 | `/compact [fokus]` | Ringkas percakapan agar konteks longgar |
 | `/resume [hapus]` | Lanjutkan percakapan tersimpan, atau hapus semuanya |

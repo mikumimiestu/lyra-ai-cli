@@ -58,6 +58,7 @@ BOLD   = "\033[1m"
 DIM    = "\033[2m"
 ITALIC = "\033[3m"
 UNDERLINE = "\033[4m"
+STRIKE = "\033[9m"
 
 # ─── Adaptive Colors ─────────────────────────────────────────────────────────
 # Pada dark theme pakai warna terang, pada light theme pakai warna lebih gelap
@@ -90,7 +91,7 @@ else:
 # Respect redirected output and explicit plain-text mode.
 if not sys.stdout.isatty() or 'NO_COLOR' in os.environ or os.environ.get('TERM') == 'dumb':
     for _name in ('RESET', 'BOLD', 'DIM', 'ITALIC', 'WHITE', 'GREEN', 'RED', 'YELLOW', 'CYAN',
-                  'UNDERLINE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
+                  'UNDERLINE', 'STRIKE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
         globals()[_name] = ''
 
 # ─── Mascot ───────────────────────────────────────────────────────────────────
@@ -369,20 +370,45 @@ def highlight_syntax(code_line, lang=""):
 
 
 
+LINK_PATTERN = re.compile(r'(!?)\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)')
+
+
+def link_label(text, url, image=False):
+    """`text (url)` with the text underlined; an image shows its alt text; a bare url is not repeated."""
+    clean = re.sub(r'\*\*|`|__', '', text).strip()
+    label = (f'[gambar: {clean}]' if clean else '[gambar]') if image else (clean or url)
+    shown = f"{UNDERLINE}{COLOR_ACCENT}{label}{RESET}"
+    return shown if label == url else f"{shown} {COLOR_DIM}({url}){RESET}"
+
+
 def format_inline_markdown(text):
-    """Format bold, italic, dan inline code dalam teks."""
+    """Format bold, italic, strikethrough, inline code and links in one line of text."""
     if not text:
         return ""
-    
+    protected = []
+
+    def keep(rendered):
+        protected.append(rendered)
+        return f"\x00{len(protected) - 1}\x00"
+
+    # Links first: their urls often hold underscores and asterisks that must not be read as emphasis.
+    text = LINK_PATTERN.sub(lambda m: keep(link_label(m.group(2), m.group(3), bool(m.group(1)))), text)
     # Inline code: `code`
-    text = re.sub(r'`([^`]+)`', rf"{INLINE_CODE_BG}{COLOR_ACCENT} \1 {RESET}", text)
+    text = re.sub(r'`([^`]+)`', lambda m: keep(f"{INLINE_CODE_BG}{COLOR_ACCENT} {m.group(1)} {RESET}"), text)
+    # Strikethrough: ~~text~~
+    text = re.sub(r'~~([^~]+)~~', rf"{STRIKE}\1{RESET}", text)
     # Bold: **bold**
     text = re.sub(r'\*\*([^*]+)\*\*', rf"{BOLD}{WHITE}\1{RESET}", text)
     # Italic: *italic* or _italic_
     text = re.sub(r'\*([^*]+)\*', rf"{ITALIC}\1{RESET}", text)
     text = re.sub(r'_([^_]+)_', rf"{ITALIC}\1{RESET}", text)
-    
-    return text
+    return re.sub(r'\x00(\d+)\x00', lambda m: protected[int(m.group(1))], text)
+
+
+def task_box(mark):
+    """Checkbox glyph for a markdown task item: [ ] or [x]."""
+    done = mark in ('x', 'X')
+    return (f"{COLOR_DIM}{ui_symbol('☒', '[x]')}{RESET}" if done else f"{COLOR_LYRA}{ui_symbol('☐', '[ ]')}{RESET}")
 
 
 def format_markdown_line(line, state):
@@ -417,6 +443,9 @@ def format_markdown_line(line, state):
     bullet = re.match(r'^(\s*)[-*+]\s+(.*)', line)
     if bullet:
         indent = ' ' * (len(bullet.group(1).replace('\t', '  ')) // 2 * 2)
+        task = re.match(r'^\[( |x|X)\]\s+(.*)', bullet.group(2))
+        if task:
+            return f"  {indent}{task_box(task.group(1))} {format_inline_markdown(task.group(2))}", state
         return f"  {indent}{COLOR_LYRA}{ui_symbol('•', '-')}{RESET} {format_inline_markdown(bullet.group(2))}", state
     numbered = re.match(r'^(\s*)(\d+)\.\s+(.*)', line)
     if numbered:
@@ -424,9 +453,11 @@ def format_markdown_line(line, state):
         return f"  {indent}{COLOR_LYRA}{numbered.group(2)}.{RESET} {format_inline_markdown(numbered.group(3))}", state
 
     # Blockquotes
-    if line.startswith("> "):
-        content = format_inline_markdown(line[2:])
-        return f"  {COLOR_DIM}{ui_symbol('▎', '|')} {ITALIC}{content}{RESET}", state
+    quote = re.match(r'^((?:>[ \t]?)+)', line)
+    if line.startswith("> ") and quote:
+        depth = quote.group(1).count('>')
+        content = format_inline_markdown(line[quote.end():])
+        return f"  {COLOR_DIM}{(ui_symbol('▎', '|') + ' ') * depth}{ITALIC}{content}{RESET}", state
 
     # Horizontal Rule
     if stripped in ("---", "***", "___"):
@@ -695,6 +726,8 @@ def approval_footer(mode):
 
 
 COMMANDS = [
+    ('/init', 'Buat atau perbarui LYRA.md untuk project ini'),
+    ('/instruksi', 'Lihat LYRA.md yang sedang dimuat'),
     ('/undo', 'Urungkan perubahan file terakhir dari Lyra'),
     ('/compact', 'Ringkas percakapan agar konteks longgar'),
     ('/resume', 'Lanjutkan percakapan yang tersimpan'),
@@ -727,6 +760,10 @@ COMMANDS = [
 
 # Longer help for `/help <perintah>`: usage, what it does, aliases, examples and caveats.
 COMMAND_DETAILS = {
+    '/init': {'usage': '/init', 'desc': 'Meminta Lyra mempelajari project di folder kerja (struktur, README, file manifest) lalu menulis LYRA.md: tujuan, struktur, perintah tes dan build, serta konvensi. Bila LYRA.md sudah ada, Lyra memeriksa dan memperbaruinya.',
+              'examples': ['/init'], 'notes': ['Lyra menulis lewat write_file atau edit_file, jadi diff dan izin tetap muncul dulu.', 'LYRA.md dibaca otomatis di sesi berikutnya. Lihat yang dimuat dengan /instruksi.']},
+    '/instruksi': {'usage': '/instruksi', 'desc': 'Menampilkan file LYRA.md yang sedang dimuat untuk sesi ini beserta ukurannya.',
+                   'examples': ['/instruksi'], 'notes': ['LYRA.md dicari dari folder kerja ke atas sampai root repositori (atau folder home). Yang paling dekat diutamakan.', 'Isinya ikut dikirim ke API Lyra pada setiap pesan; maksimal 20 KB per file dan 40 KB total.']},
     '/undo': {'usage': '/undo [list]', 'desc': 'Mengembalikan perubahan file terakhir yang dibuat Lyra (write_file atau edit_file). Diff ditampilkan dan izin diminta dulu. File yang dibuat Lyra dihapus saat diurungkan.',
               'examples': ['/undo', '/undo list'], 'notes': ['Mengingat 20 perubahan terakhir, untuk file sampai 2 MB.', 'Perubahan lewat perintah terminal (sed, git, dan sebagainya) tidak bisa diurungkan.']},
     '/compact': {'usage': '/compact [fokus]', 'desc': 'Meringkas semua percakapan sebelum permintaan terakhir menjadi satu ringkasan pendek, supaya konteks (ctx di footer) longgar kembali.',
@@ -1585,7 +1622,7 @@ class StreamRenderer:
     With wrap=True long lines are broken at word boundaries and continuation lines keep the text
     indent, instead of the terminal cutting a word in half and restarting at column 0.
     """
-    _MARKER_CHARS = frozenset('#`-*+_>|0123456789. \t')
+    _MARKER_CHARS = frozenset('#`-*+_>|0123456789. \t[]xX')      # [ ] x X: the start of a task item
 
     def __init__(self, write, format_line=None, render_table=None, wrap=False, width=None):
         self.write = write
@@ -1605,6 +1642,9 @@ class StreamRenderer:
         self.started = False
         self.lead_done = False
         self.bold = self.italic = self.code = self.star = False
+        self.strike = self.tilde = self.bang = False     # ~~strike~~, a lone ~ and a ! that may start an image
+        self.link = None                                 # a [text](url) candidate being collected
+        self.item_start = False                          # still at the start of a list item (task boxes)
         self.skip_ws = False
         self.base = ''
 
@@ -1651,7 +1691,7 @@ class StreamRenderer:
         if (re.match(r'^\s*\|', text) or re.match(r'^\s*```', text) or re.match(r'^#{1,6}[ \t]', text)
                 or re.match(r'^\s*([-*_])\1\1', text)):
             return 'block'
-        if not final and len(text) < 7 and all(char in self._MARKER_CHARS for char in text):   # "###### " needs 7
+        if not final and len(text.lstrip()) < 7 and all(char in self._MARKER_CHARS for char in text):   # "###### " needs 7
             return None
         return 'inline'
 
@@ -1678,14 +1718,16 @@ class StreamRenderer:
         if self.mode == 'block':
             self._finish_block(out)
         elif self.mode == 'inline':
-            if self.star:
-                self._text('*', out)
+            self._flush_pending(out)
             self._flush_word(out)
             out.append(RESET + '\n')
         self.line = ''
         self.mode = None
         self.col = self.indent = self.spaces = 0
         self.bold = self.italic = self.code = self.star = False
+        self.strike = self.tilde = self.bang = False
+        self.link = None
+        self.item_start = False
 
     # -- block lines ----------------------------------------------------
     def _lead(self):
@@ -1731,17 +1773,25 @@ class StreamRenderer:
         rest = text
         bullet = re.match(r'^(\s*)[-*+]\s', text)
         numbered = re.match(r'^(\s*)(\d+)\.\s', text)
-        if bullet or numbered:
+        task = re.match(r'^(\s*)(?:[-*+]|\d+\.)\s\[( |x|X)\]\s', text)
+        if task:
+            indent = ' ' * (len(task.group(1).replace('\t', '  ')) // 2 * 2)
+            out.append(f"{lead}{indent}{task_box(task.group(2))} {self.base}")
+            rest = text[task.end():]
+            self.skip_ws = True
+        elif bullet or numbered:
             match = bullet or numbered
             indent = ' ' * (len(match.group(1).replace('\t', '  ')) // 2 * 2)
             marker = ui_symbol('•', '-') if bullet else numbered.group(2) + '.'
             out.append(f"{lead}{indent}{COLOR_LYRA}{marker}{RESET} {self.base}")
             rest = text[match.end():]
             self.skip_ws = True
+            self.item_start = True
         elif text.startswith('> '):
+            quote = re.match(r'^((?:>[ \t]?)+)', text)
             self.base = COLOR_DIM + ITALIC
-            out.append(f"{lead}{COLOR_DIM}{ui_symbol('▎', '|')} {self.base}")
-            rest = text[2:]
+            out.append(f"{lead}{COLOR_DIM}{(ui_symbol('▎', '|') + ' ') * quote.group(1).count('>')}{self.base}")
+            rest = text[quote.end():]
             self.skip_ws = True
         else:
             out.append(f"{lead}{self.base}")
@@ -1755,6 +1805,8 @@ class StreamRenderer:
             style += BOLD
         if self.italic:
             style += ITALIC
+        if self.strike:
+            style += STRIKE
         if self.code:
             style += INLINE_CODE_BG + COLOR_ACCENT
         return style
@@ -1784,6 +1836,7 @@ class StreamRenderer:
             if self.col > self.indent:
                 self.spaces += 1
             return
+        self.item_start = False
         if not self.word:
             self.word_style = self._style()
         self.word.append(char)
@@ -1813,6 +1866,8 @@ class StreamRenderer:
             if char in ' \t':
                 return
             self.skip_ws = False
+        if self.link is not None and self._link_char(char, out):
+            return
         if self.star:
             self.star = False
             if char == '*':
@@ -1827,9 +1882,32 @@ class StreamRenderer:
                 self._restyle(out)
             else:
                 self._text('*', out)
-        if char == '*' and not self.code:
-            self.star = True
-            return
+        if self.tilde:
+            self.tilde = False
+            if char == '~':
+                self.strike = not self.strike
+                self._restyle(out)
+                return
+            self._text('~', out)
+        if self.bang:
+            self.bang = False
+            if char == '[':
+                self.link = {'stage': 'text', 'text': '', 'url': '', 'image': True}
+                return
+            self._text('!', out)
+        if not self.code:
+            if char == '*':
+                self.star = True
+                return
+            if char == '~':
+                self.tilde = True
+                return
+            if char == '!':
+                self.bang = True
+                return
+            if char == '[':
+                self.link = {'stage': 'text', 'text': '', 'url': '', 'image': False}
+                return
         if char == '`':
             self.code = not self.code
             if self.code:
@@ -1840,3 +1918,82 @@ class StreamRenderer:
                 self._restyle(out)
             return
         self._text(char, out)
+
+    # -- links, images and task boxes ------------------------------------
+    def _flush_pending(self, out):
+        """End of line: whatever was waiting for a partner character is plain text after all."""
+        if self.link is not None:
+            self._abort_link(out, closed=self.link['stage'] != 'text', with_url=self.link['stage'] == 'url')
+        if self.star:
+            self._text('*', out)
+        if self.tilde:
+            self._text('~', out)
+        if self.bang:
+            self._text('!', out)
+
+    def _link_char(self, char, out):
+        """Feed one char to the link candidate. True when consumed; False when the candidate was dropped."""
+        link = self.link
+        if link['stage'] == 'text':
+            if char == ']':
+                link['stage'] = 'wait'
+            else:
+                link['text'] += char
+                if len(link['text']) > 200:
+                    self._abort_link(out, closed=False)
+            return True
+        if link['stage'] == 'wait':
+            if char == '(':
+                link['stage'] = 'url'
+                return True
+            if self.item_start and link['text'] in (' ', 'x', 'X') and char in ' \t' and not link['image']:
+                self.link = None                                  # "- [ ] task": a checkbox, not a link
+                self._checkbox(link['text'], out)
+                return False
+            self._abort_link(out, closed=True)
+            return False
+        if char == ')':
+            self._finish_link(out)
+        else:
+            link['url'] += char
+            if len(link['url']) > 600:
+                self._abort_link(out, closed=True, with_url=True)
+        return True
+
+    def _checkbox(self, mark, out):
+        done = mark in ('x', 'X')
+        self._code(COLOR_DIM if done else COLOR_LYRA, out)
+        for ch in (ui_symbol('☒', '[x]') if done else ui_symbol('☐', '[ ]')):
+            self._text(ch, out)
+        self._restyle(out)
+
+    def _abort_link(self, out, closed, with_url=False):
+        link, self.link = self.link, None
+        literal = ('!' if link['image'] else '') + '[' + link['text'] + (']' if closed else '')
+        if with_url:
+            literal += '(' + link['url']
+        for ch in literal:
+            self._text(ch, out)
+
+    def _finish_link(self, out):
+        link, self.link = self.link, None
+        url = link['url'].strip()
+        if url.startswith('<') and '>' in url:
+            url = url[1:url.index('>')]
+        url = url.split()[0] if url.split() else ''
+        if not url:
+            for ch in ('!' if link['image'] else '') + '[' + link['text'] + ']()':
+                self._text(ch, out)
+            return
+        clean = re.sub(r'\*\*|`|__', '', link['text']).strip()
+        label = (f'[gambar: {clean}]' if clean else '[gambar]') if link['image'] else (clean or url)
+        self._code(UNDERLINE + COLOR_ACCENT, out)
+        for ch in label:
+            self._text(ch, out)
+        self._restyle(out)
+        if label != url:
+            self._text(' ', out)
+            self._code(COLOR_DIM, out)
+            for ch in f'({url})':
+                self._text(ch, out)
+            self._restyle(out)

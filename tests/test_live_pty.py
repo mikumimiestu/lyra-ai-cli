@@ -238,6 +238,24 @@ class LivePtyTests(unittest.TestCase):
         self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, cols=60)))      # too narrow for the pet
         self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, rows=18)))      # too short for the pet
 
+    def test_project_instructions_are_announced_and_sent(self):
+        project = os.path.realpath(tempfile.mkdtemp(prefix='lyra-proj-'))
+        self.addCleanup(__import__('shutil').rmtree, project, True)
+        os.makedirs(os.path.join(project, '.git'))
+        Path(project, 'LYRA.md').write_text('Selalu jawab dengan satu kata: SIAP.\n', encoding='utf-8')
+        run = PtyRun(self.api.url, rows=self.ROWS, cols=110, cwd=project, env={'HOME': os.path.dirname(project)},
+                     extra='app.get_current_system_prompt = _real_prompt\n')            # the real prompt builder, not the stub
+        self.addCleanup(run.close)
+        self.assertTrue(run.wait_for('Shift+Tab', 10), run.screen.text())
+        run.send('/instruksi\r')
+        self.assertTrue(run.wait_for('Instruksi project yang dimuat', 5), run.screen.text())
+        self.assertIn('LYRA.md', run.screen.text())
+        run.send('halo\r')
+        self.assertTrue(run.wait_for('Instruksi project dimuat', 6), run.screen.text())
+        self.assertTrue(run.wait_for('Halo! Ini', 8))
+        system = self.api.requests[-1]['messages'][0]['content']
+        self.assertIn('Selalu jawab dengan satu kata: SIAP.', system)
+
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})
         self.addCleanup(run.close)

@@ -105,6 +105,7 @@ app.load_config = lambda: {{"api_key": "test", "model_index": 2, "reasoning_effo
 app.save_config = lambda config: None
 app.ensure_daemon_running = lambda: None
 app.check_remote_version = lambda timeout=4.0: (False, app.VERSION)
+_real_prompt = app.get_current_system_prompt
 app.get_current_system_prompt = lambda: "sistem"
 {extra}
 app.main()
@@ -113,7 +114,7 @@ print("PROCESS-ENDED")
 
 
 class PtyRun:
-    def __init__(self, url, rows=30, cols=100, env=None, extra=''):
+    def __init__(self, url, rows=30, cols=100, env=None, extra='', cwd=None):
         self.screen = Screen(rows, cols)
         code = LAUNCHER.format(root=ROOT, url=url, extra=extra)
         self.pid, self.fd = pty.fork()
@@ -122,7 +123,7 @@ class PtyRun:
             os.environ.setdefault('LYRA_SESSIONS_DIR', SESSIONS_FOR_TESTS)
             os.environ.update(env or {})
             os.environ.pop('LYRA_CLASSIC', None) if not (env and 'LYRA_CLASSIC' in env) else None
-            os.chdir(ROOT)
+            os.chdir(cwd or ROOT)
             os.execvp(sys.executable, [sys.executable, '-c', code])
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
         self.raw = ''

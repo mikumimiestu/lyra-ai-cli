@@ -41,7 +41,8 @@ from config import (
     VERSION, check_remote_version, perform_update
 )
 from memory import (read_memory, save_memory, clear_memory, new_session_id, save_session, list_sessions,
-                    load_session, delete_all_sessions, relative_time, history_enabled)
+                    load_session, delete_all_sessions, relative_time, history_enabled, read_instructions,
+                    instructions_section, INSTRUCTION_FILE)
 from reminder import (
     add_reminder, list_reminders, cancel_reminder,
     ensure_daemon_running, is_daemon_running, run_reminder_daemon_loop
@@ -125,7 +126,7 @@ Kamu memiliki akses ke tools komputer lokal pengguna, memori jangka panjang (.md
 [ISI MEMORI TERSIMPAN (~/.amagi_memory.md)]:
 {memory_section}
 
-Untuk memanggil tool, sertakan blok XML ini TEPAT di akhir jawabanmu:
+{instructions_section}Untuk memanggil tool, sertakan blok XML ini TEPAT di akhir jawabanmu:
 <tool_call>
 {{
   "name": "nama_tool",
@@ -168,7 +169,8 @@ def get_current_system_prompt():
     mem_info = read_memory()
     return SYSTEM_PROMPT_TEMPLATE.format(
         system_time=time_info,
-        memory_section=mem_info if mem_info.strip() else "(Belum ada memori tersimpan)"
+        memory_section=mem_info if mem_info.strip() else "(Belum ada memori tersimpan)",
+        instructions_section=instructions_section(read_instructions(os.getcwd())),
     )
 
 
@@ -729,6 +731,7 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
         ("Tugas", f"{done}/{len(todo_list.items)} selesai" if todo_list.items else "-"),
         ("Persetujuan", APPROVAL_LABELS[APPROVAL.mode]),
         ("Urungkan", f"{len(UNDO.items)} perubahan bisa diurungkan" if UNDO.items else "-"),
+        ("Instruksi", ", ".join(f"{os.path.basename(os.path.dirname(i['path'])) or '/'}/{INSTRUCTION_FILE}" for i in reversed(read_instructions(cwd))) or "-"),
         ("Riwayat", "tersimpan di ~/.amagi_sessions" if history_enabled() else "dimatikan (LYRA_NO_HISTORY)"),
         ("Memori", f"{len(read_memory().strip())} karakter"),
         ("Pengingat", "daemon aktif" if is_daemon_running() else "daemon mati"),
@@ -910,6 +913,50 @@ def handle_compact_command(messages, headers, model_id, effort, focus=""):
     return new_messages
 
 # ─── Undo, saved sessions ─────────────────────────────────────────────────────
+INIT_PROMPT = (
+    "Buat file LYRA.md di folder kerja ini ({folder}) sebagai panduan singkat untukmu sendiri pada sesi berikutnya. "
+    "Pelajari project dulu: lihat isi folder utama dengan list_directory, baca README dan file manifest yang ada "
+    "(package.json, pyproject.toml, setup.py, composer.json, go.mod, Cargo.toml, dan sejenisnya), lalu baca satu atau "
+    "dua file kunci; pakai search bila perlu. Isi LYRA.md (maksimal sekitar 60 baris, bahasa Indonesia, ringkas, tanpa "
+    "basa-basi): 1) tujuan project dalam 1-2 kalimat, 2) struktur folder yang penting, 3) perintah untuk menjalankan, "
+    "build, dan tes, 4) konvensi kode serta hal yang harus dijaga, 5) hal yang tidak boleh diubah atau dijalankan tanpa izin. "
+    "Tulis hanya yang kamu verifikasi dari file, jangan mengarang. Simpan dengan write_file."
+)
+UPDATE_PROMPT = (
+    "LYRA.md di {folder} sudah ada (isinya sudah kamu terima sebagai instruksi project). Periksa apakah masih sesuai dengan "
+    "isi project sekarang: lihat struktur folder, baca README dan file manifest, lalu perbarui bagian yang usang atau kurang "
+    "dengan edit_file. Jangan menulis ulang yang masih benar dan jangan mengarang; kalau semuanya masih sesuai, katakan saja."
+)
+
+def build_init_prompt(folder):
+    exists = os.path.isfile(os.path.join(folder, INSTRUCTION_FILE))
+    return (UPDATE_PROMPT if exists else INIT_PROMPT).format(folder=folder)
+
+def format_kb(size):
+    return f"{size / 1024:.1f}".replace(".", ",") + " KB"
+
+def handle_instructions_command(cwd):
+    files = read_instructions(cwd)
+    print()
+    if not files:
+        print(f"  {COLOR_DIM}Belum ada {INSTRUCTION_FILE} di {short_path(cwd)} atau di atasnya (sampai root repositori).{RESET}")
+        print(f"  {COLOR_DIM}Ketik /init agar Lyra mempelajari project ini dan membuatnya.{RESET}\n")
+        return
+    print(f"{COLOR_LYRA}{ui_symbol('●', '*')}{RESET} {BOLD}Instruksi project yang dimuat{RESET} {COLOR_DIM}(terakhir = paling dekat, paling diutamakan){RESET}")
+    for item in files:
+        print(f"  {short_path(item['path'])}  {COLOR_DIM}{format_kb(item['size'])}" + (" · dipotong" if item["truncated"] else "") + f"{RESET}")
+    print(f"  {COLOR_DIM}Isinya ikut dikirim ke API Lyra pada setiap pesan. Ubah file-nya untuk mengubah panduan.{RESET}\n")
+
+def note_instructions(cwd, seen):
+    """Tell the user, once per file version, that a LYRA.md is steering this session."""
+    for item in read_instructions(cwd):
+        key = item["path"]
+        if seen.get(key) == item["digest"]:
+            continue
+        verb = "diperbarui" if key in seen else "dimuat"
+        seen[key] = item["digest"]
+        print(f"\n  {COLOR_DIM}{ui_symbol('⎿', 'L')}{RESET}  Instruksi project {verb}: {short_path(key)} {COLOR_DIM}({format_kb(item['size'])}){RESET}")
+
 def handle_undo_command(user_input):
     parts = user_input.split()
     if len(parts) > 1 and parts[1].lower() in ("list", "daftar"):
@@ -1205,6 +1252,7 @@ def _run_session(live=None):
     QUOTA.refresh(config, force=True)
     session_id = new_session_id()
     session_started = time.time()
+    seen_instructions = {}
     if any(arg in ("--continue", "-c") for arg in sys.argv[1:]):
         latest = list_sessions(1)
         loaded = load_session(latest[0]["id"]) if latest else None
@@ -1286,6 +1334,13 @@ def _run_session(live=None):
                 handle_mode_command(user_input)
                 warned_all = APPROVAL.mode == "all"
                 continue
+
+            elif user_input.lower().split()[0] == "/instruksi":
+                handle_instructions_command(active_cwd)
+                continue
+
+            elif user_input.lower().split()[0] == "/init":
+                user_input = build_init_prompt(active_cwd)      # not a command to run: Lyra studies the project and writes LYRA.md
 
             elif user_input.lower().split()[0] == "/undo":
                 handle_undo_command(user_input)
@@ -1434,6 +1489,7 @@ def _run_session(live=None):
             activity.begin_turn()
 
             # ── Kirim ke AI ───────────────────────────────────────────────────
+            note_instructions(active_cwd, seen_instructions)
             # Selalu perbarui system prompt dengan waktu & memori paling aktual
             messages[0] = {"role": "system", "content": get_current_system_prompt()}
             messages.append({"role": "user", "content": message_content})

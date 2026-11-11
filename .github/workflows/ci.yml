@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Unit tests, including the end-to-end tests that drive the real CLI in a pseudo-terminal
+  # (those are skipped automatically on Windows, where there is no pty).
+  tests:
+    name: Tes (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # Windows has never been run by hand yet. Keep its result visible without failing the whole CI
+    # until the first runs show what needs fixing; then remove this line.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ['3.9', '3.13']
+        include:
+          - os: ubuntu-latest
+            python: '3.11'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Pasang dependency
+        run: python -m pip install --upgrade pip requests "prompt_toolkit>=3.0.36,<4"
+      - name: Jalankan tes
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONUTF8: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
+
+  # The code claims to run on Python 3.7+, which the runners no longer offer, so check the syntax instead.
+  compat:
+    name: Sintaksis Python 3.7
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Periksa semua berkas .py
+        run: |
+          python - <<'PY'
+          import ast, glob, sys
+          bad = []
+          for name in glob.glob('*.py') + glob.glob('tests/*.py'):
+              try:
+                  ast.parse(open(name, encoding='utf-8').read(), feature_version=(3, 7))
+              except SyntaxError as error:
+                  bad.append((name, str(error)))
+          print('berkas dengan sintaksis lebih baru dari 3.7:', bad)
+          sys.exit(1 if bad else 0)
+          PY
+
+  # The install scripts run in local mode (the files next to them), then the installed command is used.
+  install-unix:
+    name: Instalasi install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Jalankan install.sh
+        run: bash install.sh
+      - name: Perintah amagi berfungsi
+        run: |
+          "$HOME/.local/bin/amagi" --version
+          "$HOME/.local/bin/amagi" --help | head -8
+          status=0
+          "$HOME/.local/bin/amagi" --opsi-ngawur || status=$?
+          test "$status" -eq 2
+
+  install-windows:
+    name: Instalasi install.ps1 (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    continue-on-error: true   # same reason as the Windows test job above
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Jalankan install.ps1
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File install.ps1
+      - name: Perintah amagi berfungsi
+        shell: cmd
+        run: |
+          "%USERPROFILE%\.local\bin\amagi.cmd" --version
+          "%USERPROFILE%\.local\bin\amagi.cmd" --help
+
+  # The pip route: build the source archive exactly like the website does, install it in a clean venv.
+  package:
+    name: Paket pip
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Bangun dan pasang arsip sumber
+        run: |
+          python website/scripts/package-cli.py > amagi.tar.gz
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install ./amagi.tar.gz
+          "$RUNNER_TEMP/venv/bin/amagi" --version
+          "$RUNNER_TEMP/venv/bin/amagi" --help | head -8
