@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.7
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.8
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -26,9 +26,15 @@
 
 - **Dua cara masuk:** saat pertama dijalankan, pilih *Login dengan akun AstByte* atau *Pakai API key*. API key tetap bekerja seperti biasa dan ditagih dari saldo developer.
 - **Login akun:** CLI menampilkan kode dan membuka browser. Setujui kode itu di halaman AstByte, lalu kembali ke terminal. Tidak ada password yang diketik di CLI.
-- **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
+- **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.8 — Kuota 5 jam dan mingguan
+
+- **Dua jendela kuota:** kuota harian diganti jendela 5 jam (dimulai saat pesan pertama, lalu menunggu genap 5 jam kalau habis) dan batas mingguan. Per 5 jam: Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token; batas mingguan 9x angka itu.
+- **`/kuota`** menampilkan kedua jendela beserta sisa, persen terpakai, dan waktu reset (bisa dalam hari). Footer "sisa kuota" memakai jendela yang paling ketat.
+- Tetap aman bila backend masih mengirim format lama: bagian mingguan disembunyikan, tidak error.
 
 ### Perbaikan v2.12.7 — Tailwind, tampilan lebih rapi, dan Python otomatis
 
@@ -312,7 +318,7 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | `/run <cmd>` | Langsung jalankan perintah terminal |
 | `/login` | Masuk dengan akun AstByte |
 | `/logout` | Keluar dari akun AstByte |
-| `/kuota` | Lihat sisa token hari ini |
+| `/kuota` | Lihat sisa token (jendela 5 jam dan mingguan) |
 | `/reset-key` | Atur ulang ASTBYTE_API_KEY |
 | `/help` | Tampilkan daftar bantuan lengkap |
 | `exit` / `quit` | Keluar dari aplikasi |

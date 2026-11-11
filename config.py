@@ -101,7 +101,7 @@ def login_with_account(config: dict):
     return None
 
 def fetch_quota(config: dict = None):
-    """Sisa kuota token hari ini untuk login akun. Return dict atau None (mode API key / gagal)."""
+    """Sisa kuota token (jendela 5 jam dan mingguan) untuk login akun. Return dict atau None (mode API key / gagal)."""
     if config is None:
         config = load_config()
     if not uses_account_login(config):
@@ -128,7 +128,7 @@ def logout(config: dict = None):
 def _choose_login_method():
     """0 = login akun AstByte, 1 = API key, None = batal."""
     options = [
-        ("Login dengan akun AstByte", "Pakai kuota token harian sesuai tier akunmu"),
+        ("Login dengan akun AstByte", "Pakai kuota token sesuai tier akunmu (5 jam + mingguan)"),
         ("Pakai API key", "Bayar sesuai pemakaian dari saldo developer"),
     ]
     picked = choose("Masuk ke Amagi CLI", options, 0, "Pilih cara memakai Amagi CLI.")
@@ -211,7 +211,7 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ Kredensial berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.12.7"
+VERSION = "2.12.8"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"

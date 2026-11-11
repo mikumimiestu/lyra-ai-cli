@@ -524,8 +524,11 @@ def render_command_help(topic):
 
 def format_duration(seconds):
     seconds = max(0, int(seconds))
-    hours, rest = divmod(seconds, 3600)
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
     minutes = rest // 60
+    if days:
+        return f"{days} hari {hours} jam"
     return f"{hours} jam {minutes} menit" if hours else f"{minutes} menit"
 
 def quota_error_message(body):
@@ -541,13 +544,13 @@ def quota_error_message(body):
 BILLING_STATE = {"balance": False, "notified": False}
 
 def note_balance_billing():
-    """Tell the user once per session that the daily quota is gone and the developer balance is being used."""
+    """Tell the user once per session that the token quota is gone and the developer balance is being used."""
     if BILLING_STATE["balance"] and not BILLING_STATE["notified"]:
         BILLING_STATE["notified"] = True
-        print(f"\n  {YELLOW}Kuota harian habis, sekarang memakai saldo developer.{RESET}")
+        print(f"\n  {YELLOW}Kuota token habis, sekarang memakai saldo developer.{RESET}")
 
 class QuotaMonitor:
-    """Latest daily-quota reading for the footer. Fetched in the background so the UI never waits on the network."""
+    """Latest quota reading (5-hour window and weekly) for the footer. Fetched in the background so the UI never waits on the network."""
     MIN_INTERVAL = 20.0
 
     def __init__(self):
@@ -582,7 +585,11 @@ class QuotaMonitor:
         limit = data.get("limit") or 0
         if not limit:
             return None
-        return max(0, min(100, round(float(data.get("remaining", 0)) * 100 / limit)))
+        percent = float(data.get("remaining", 0)) * 100 / limit
+        week_limit = data.get("week_limit") or 0
+        if week_limit:   # the tighter of the 5-hour window and the weekly window is what actually limits the user
+            percent = min(percent, float(data.get("week_remaining", 0)) * 100 / week_limit)
+        return max(0, min(100, round(percent)))
 
     def footer(self, config):
         """(text, percent) for the footer, or (None, None) when there is nothing worth showing."""
@@ -604,10 +611,19 @@ def show_quota(config):
         print(f"\n  {RED}Gagal mengambil kuota. Coba lagi sebentar.{RESET}\n")
         return
     QUOTA.update(quota)
-    percent = min(100, round(quota["used"] * 100 / quota["limit"])) if quota["limit"] else 100
-    print(f"\n  {BOLD}Kuota token hari ini{RESET} {DIM}(tier {quota['tier'].upper()}){RESET}")
-    print(f"  Terpakai {quota['used']:,} dari {quota['limit']:,} token ({percent}%)")
-    print(f"  Sisa     {BOLD}{quota['remaining']:,}{RESET} token {DIM}· reset dalam {format_duration(quota['resets_in_seconds'])}{RESET}")
+    print(f"\n  {BOLD}Kuota token{RESET} {DIM}(tier {str(quota.get('tier', '-')).upper()}){RESET}")
+    windows = (
+        ("5 jam", quota.get("used", 0), quota.get("limit", 0), quota.get("remaining", 0),
+         quota.get("resets_in_seconds") if quota.get("window_active", True) else None),
+        ("Mingguan", quota.get("week_used", 0), quota.get("week_limit", 0), quota.get("week_remaining", 0),
+         quota.get("week_resets_in_seconds") or None),
+    )
+    for name, used, limit, remaining, resets_in in windows:
+        if not limit:
+            continue
+        percent = min(100, round(used * 100 / limit))
+        when = f"reset dalam {format_duration(resets_in)}" if resets_in else "dimulai saat pesan pertama"
+        print(f"  {name:<9}{BOLD}{remaining:,}{RESET} sisa dari {limit:,} token ({percent}% terpakai) {DIM}· {when}{RESET}")
     fallback = quota.get("fallback") or {}
     if fallback.get("enabled") and fallback.get("has_key"):
         print(f"  Cadangan {DIM}saldo developer aktif, dipakai setelah kuota habis{RESET}\n")
@@ -1264,7 +1280,7 @@ def run_print_mode(question, stdin_text=None):
                 "reasoning_effort": config.get("reasoning_effort", "medium")})
             if BILLING_STATE["balance"] and not BILLING_STATE["notified"]:
                 BILLING_STATE["notified"] = True
-                sys.stderr.write("Kuota harian habis, memakai saldo developer.\n")
+                sys.stderr.write("Kuota token habis, memakai saldo developer.\n")
             if status == 401:
                 return fail("[401] Akses ditolak. Masuk ulang lewat 'amagi' (/login) atau periksa ASTBYTE_API_KEY.", 1)
             if status == 429 and uses_account_login(config):
