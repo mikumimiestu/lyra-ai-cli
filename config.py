@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import socket
@@ -210,7 +211,7 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ Kredensial berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.12.4"
+VERSION = "2.12.5"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
 RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
@@ -241,6 +242,29 @@ def check_remote_version(timeout=4.0):
         pass
     return False, VERSION
 
+REQUIRED_PACKAGES = (("requests", "requests"), ("prompt_toolkit", "prompt_toolkit>=3.0.36,<4"))
+
+
+def missing_packages():
+    """pip specs of the required packages this Python cannot import."""
+    import importlib.util
+    return [spec for module, spec in REQUIRED_PACKAGES if importlib.util.find_spec(module) is None]
+
+
+def install_packages(specs, timeout=300):
+    """pip install into the interpreter that runs Lyra (the installer's venv). Returns (ok, message)."""
+    import subprocess
+    try:
+        done = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *specs],
+                              capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return False, str(error)
+    if done.returncode == 0:
+        return True, "terpasang"
+    lines = (done.stderr or done.stdout or "").strip().splitlines()
+    return False, lines[-1] if lines else f"pip keluar dengan kode {done.returncode}"
+
+
 def perform_update(target_dir=None):
     """
     Download file terbaru dari GitHub ke direktori instalasi.
@@ -269,5 +293,10 @@ def perform_update(target_dir=None):
         except Exception as e:
             return False, f"Gagal mengunduh {fname}: {e}"
 
-    return True, f"Berhasil memperbarui {len(updated_files)} file ke {target_dir}"
+    note = ""
+    missing = missing_packages()      # versions before 2.3 shipped without prompt_toolkit; /update only copies files
+    if missing:
+        ok, detail = install_packages(missing)
+        note = f"; paket {', '.join(missing)} " + ("ikut dipasang" if ok else f"belum terpasang ({detail})")
+    return True, f"Berhasil memperbarui {len(updated_files)} file ke {target_dir}{note}"
 

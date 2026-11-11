@@ -227,7 +227,7 @@ class LivePtyTests(unittest.TestCase):
             return ' '.join(line.split())
         for name, env in (('true colour', {'COLORTERM': 'truecolor'}), ('256 colours', {'COLORTERM': '', 'TERM_PROGRAM': 'Apple_Terminal'})):
             lines = self.header_of(env)
-            self.assertEqual(len(blocks(lines)), 12, (name, lines[:16]))
+            self.assertEqual(len(blocks(lines)), 10, (name, lines[:16]))
             title = next(l for l in lines if 'Lyra CLI' in l)
             self.assertTrue('▀' in title or '▄' in title, title)               # beside the pet, not under it
             self.assertIn('v', squash(title))
@@ -237,6 +237,7 @@ class LivePtyTests(unittest.TestCase):
         self.assertTrue(any(squash(l).startswith('✦ Lyra CLI v') for l in lines))
         self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, cols=60)))      # too narrow for the pet
         self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, rows=18)))      # too short for the pet
+        self.assertEqual(len(blocks(self.header_of({'COLORTERM': 'truecolor'}, rows=20))), 10)   # exactly enough
 
     def test_project_instructions_are_announced_and_sent(self):
         project = os.path.realpath(tempfile.mkdtemp(prefix='lyra-proj-'))

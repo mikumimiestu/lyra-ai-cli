@@ -27,7 +27,7 @@ from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported,
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
                      USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE,
-                     clear_terminal, COMMAND_DETAILS, resolve_command, suggest_commands)
+                     clear_terminal, COMMAND_DETAILS, resolve_command, suggest_commands, EDITOR_AVAILABLE)
 from tools import (
     list_directory, read_file, write_file, execute_command,
     create_directory, init_project, DEFAULT_TIMEOUT,
@@ -38,7 +38,7 @@ from tools import (
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
     login_with_account, logout, fetch_quota, uses_account_login,
-    VERSION, check_remote_version, perform_update
+    VERSION, check_remote_version, perform_update, install_packages, missing_packages
 )
 from memory import (read_memory, save_memory, clear_memory, new_session_id, save_session, list_sessions,
                     load_session, delete_all_sessions, relative_time, history_enabled, read_instructions,
@@ -324,6 +324,38 @@ def handle_update_command(interactive=True):
         return True
     print(f"  {RED}✖ Gagal memperbarui: {msg}{RESET}\n")
     return False
+
+def check_editor_dependency(config):
+    """Without prompt_toolkit Lyra falls back to a bare input line (no menus, autocomplete or multi-line).
+
+    Offer to install it once; a "no" is remembered so the question is not repeated every start.
+    """
+    if EDITOR_AVAILABLE or not (sys.stdin.isatty() and sys.stdout.isatty()) or config.get("editor_prompt_declined"):
+        return
+    print(f"\n  {YELLOW}Editor lengkap belum aktif:{RESET} paket {BOLD}prompt_toolkit{RESET} belum terpasang, jadi menu panah,")
+    print(f"  {COLOR_DIM}autocomplete, dan input beberapa baris tidak tersedia. Ini biasanya terjadi setelah /update dari versi lama.{RESET}")
+    try:
+        answer = input(f"  {BOLD}{COLOR_USER}Pasang sekarang lewat pip? (y/n) ❯{RESET} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if answer not in ("y", "ya", "yes"):
+        config["editor_prompt_declined"] = True
+        save_config(config)
+        print(f"  {COLOR_DIM}Oke, tidak ditanyakan lagi. Pasang kapan saja: {sys.executable} -m pip install prompt_toolkit{RESET}\n")
+        return
+    spinner = Spinner("Memasang prompt_toolkit...")
+    spinner.start()
+    try:
+        ok, detail = install_packages(["prompt_toolkit>=3.0.36,<4"])
+    finally:
+        spinner.stop()
+    if ok:
+        print(f"  {GREEN}✓ prompt_toolkit terpasang. Memulai ulang Lyra...{RESET}\n")
+        restart_application()
+    else:
+        print(f"  {RED}Gagal memasang: {detail}{RESET}")
+        print(f"  {COLOR_DIM}Coba manual: {sys.executable} -m pip install prompt_toolkit{RESET}\n")
 
 def restart_application():
     """Replace this process with a fresh one so an update takes effect without retyping `amagi`."""
@@ -1277,6 +1309,7 @@ def _run_session(live=None):
 
     # Compact Lyra welcome
     render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd, MODELS[model_idx]["supports_reasoning"])
+    check_editor_dependency(config)
     editor = TerminalInput(lambda: {
         "model": MODELS[model_idx]["name"],
         "effort": config.get("reasoning_effort", "medium"),

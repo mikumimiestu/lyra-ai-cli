@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kucing pixel art Nexara]    Lyra CLI  v2.12.4
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.5
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,13 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.5 — Windows dan editor yang hilang
+
+- **Kepala kucing saja:** maskot di awal kini hanya kepala Nexara (10 baris, sebelumnya 12), tanpa badan, kerah, dan kaki. Terminal minimal 20 baris tingginya agar gambarnya tampil.
+- **Maskot di Windows:** terminal Windows tidak mengisi `COLORTERM` atau `TERM`, jadi Lyra mengira terminal tanpa warna dan hanya menampilkan teks. Kini Windows Terminal, VS Code, ConEmu, dan konsol Windows 10 build 14931 ke atas dikenali sebagai warna penuh.
+- **Tanpa `prompt_toolkit`:** input tidak lagi tampil sebagai garis putus-putus dengan kata "pesan". Lyra menampilkan satu keterangan beserta perintah pip yang tepat, menawarkan untuk memasangnya sekali saat dibuka (jawaban "n" diingat dan tidak ditanyakan lagi), dan `/update` sekarang ikut memasang paket yang hilang. Sebelumnya `/update` hanya menyalin file, sehingga instalasi lama yang diperbarui kehilangan menu panah, autocomplete, dan input beberapa baris.
+- Kalau `prompt_toolkit` belum terpasang dan kamu tidak ingin menunggu penawaran: `python -m pip install prompt_toolkit` (pada instalasi lewat installer, gunakan Python di folder `.amagi-cli/venv`).
 
 ### Baru di v2.12.4 — Panduan project, markdown lebih lengkap, dan CI
 

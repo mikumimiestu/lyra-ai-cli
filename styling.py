@@ -95,7 +95,7 @@ if not sys.stdout.isatty() or 'NO_COLOR' in os.environ or os.environ.get('TERM')
         globals()[_name] = ''
 
 # ─── Mascot ───────────────────────────────────────────────────────────────────
-# Nexara's pet, drawn as pixel art: 27 columns x 24 pixel rows, two pixel rows per terminal row
+# Nexara's pet (head only), drawn as pixel art: 27 columns x 20 pixel rows, two pixel rows per terminal row
 # (half-block characters). Letters index PET_PALETTE; "." is transparent so the terminal's own
 # background shows through.
 PET_PALETTE = {
@@ -109,15 +109,14 @@ PET_PALETTE = {
     'r': (232, 84, 104),
 }
 PET_SPRITE = [
+    '.....i...............i.....',
     '....iwi.............iwi....',
-    '....iwwi...........iwwi....',
-    '....iwbwii.......iiwbwi....',
-    '...iwwbbwwiiiiiiiwwbbwwi...',
+    '....iwbii.........iibwi....',
+    '....iwbbwiiiiiiiiiwbbwi....',
     '...iwwbbbwwwwwwwwwbbbwwi...',
     '...iwbbwwwwwwwwwwwwwbbwi...',
-    '...iwbwwwwwwwwwwwwwwwbwi...',
-    '..iwwwwwwwwwwwwwwwwwwwwwi..',
-    '..iwwwwwwwwwwlwwwwwwwwwwi..',
+    '...iwwwwwwwwwwwwwwwwwwwi...',
+    '...iwwwwwwwwwlwwwwwwwwwi...',
     '..iwwwwwwwwwlwlwwwwwwwwwi..',
     '.iwwwwwwwwwwwwwwwwwwwwwwwi.',
     '.iwwwwwwwiiwwwwwiiwwwwwwwi.',
@@ -125,19 +124,16 @@ PET_SPRITE = [
     '.iwwwwwwwwwwwwwwwwwwwwwwwi.',
     '.iwwwppwwwwiiiiiwwwwppwwwi.',
     '..iwwwwwwwwirrriwwwwwwwwi..',
-    '..iwwwwwwwwwiiiwwwwwwwwwi..',
-    '...iwwwwwwwwwwwwwwwwwwwi...',
-    '....isssssssssssssssssi....',
-    '....iwwkkkkkklkkkkkkwwi....',
-    '.....iwkkkkklklkkkkkwi.....',
-    '....iwwwkkkklklkkkkwwwi....',
-    '...ibwwwbwwwwwwwwwbwwwbi...',
-    '....iwwwiiwwwwwwwiiwwwi....',
+    '...iwwwwwwwwiiiwwwwwwwwi...',
+    '....iwwwwwwwwwwwwwwwwwi....',
+    '.....iisssssssssssssii.....',
+    '.......iiwwwwwwwwwii.......',
+    '.........iiiiiiiii.........',
 ]
 PET_COLS = len(PET_SPRITE[0])
 PET_ROWS = len(PET_SPRITE) // 2
 MASCOT_MIN_COLS = 66        # sprite + gap + enough room for the text beside it
-MASCOT_MIN_ROWS = 22
+MASCOT_MIN_ROWS = 20
 
 
 def color_depth():
@@ -149,6 +145,17 @@ def color_depth():
     if (colorterm in ('truecolor', '24bit') or term.endswith('-direct')
             or os.environ.get('TERM_PROGRAM', '') in ('iTerm.app', 'WezTerm', 'vscode', 'ghostty')):
         return 24
+    if os.name == 'nt':
+        # Windows terminals set neither COLORTERM nor TERM. Windows Terminal, VS Code and ConEmu do true
+        # colour; so does the classic console since Windows 10 build 14931.
+        if os.environ.get('WT_SESSION') or os.environ.get('ConEmuANSI') == 'ON':
+            return 24
+        try:
+            if sys.getwindowsversion().build >= 14931:
+                return 24
+        except (AttributeError, OSError):
+            pass
+        return 0
     return 8 if '256color' in term else 0
 
 
@@ -956,6 +963,7 @@ class TerminalInput:
         self.session = None
         self._bindings = None
         self.branch = None
+        self._hinted = False
         self.notice = None   # right-aligned footer message, e.g. an available update
         # Pipes and dumb terminals keep the plain text input path.
         interactive = sys.stdin.isatty() and sys.stdout.isatty() and os.environ.get('TERM') != 'dumb'
@@ -1090,12 +1098,12 @@ class TerminalInput:
         prompt = ' {}{}{}{} '.format(BOLD, COLOR_LYRA, marker, RESET)
         self.branch = workspace_branch(self.context().get('directory', os.getcwd()))
         if self.session is None:
-            border = '+' + '-' * max(3, min(get_terminal_width() - 5, 84))
-            print('  ' + border + ' pesan')
-            try:
-                return input(prompt)
-            finally:
-                print('  ' + border)
+            if not EDITOR_AVAILABLE and not self._hinted:
+                self._hinted = True
+                print(f"  {COLOR_DIM}Editor sederhana: paket prompt_toolkit belum terpasang, jadi menu panah, autocomplete, "
+                      f"dan input beberapa baris tidak aktif.{RESET}")
+                print(f"  {COLOR_DIM}Pasang dengan: {sys.executable} -m pip install prompt_toolkit{RESET}\n")
+            return input(prompt)
         return self.session.prompt(ANSI(prompt))
 
 

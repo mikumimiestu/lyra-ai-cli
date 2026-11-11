@@ -191,7 +191,9 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(editor.read(), 'hello')
 
     def test_sprite_data_is_well_formed(self):
-        self.assertEqual(len(styling.PET_SPRITE), 24)
+        self.assertEqual(len(styling.PET_SPRITE), 20)                       # head only: ears, face, nothing below
+        self.assertEqual(styling.PET_ROWS, 10)
+        self.assertEqual(len(set(styling.PET_SPRITE[-1]) - {'.'}) > 0, True)  # the chin outline is inside the canvas
         self.assertEqual({len(row) for row in styling.PET_SPRITE}, {27})
         used = {ch for row in styling.PET_SPRITE for ch in row} - {'.'}
         self.assertTrue(used <= set(styling.PET_PALETTE), used - set(styling.PET_PALETTE))
