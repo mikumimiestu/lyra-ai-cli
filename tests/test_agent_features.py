@@ -615,7 +615,7 @@ class ArrowMenuTests(unittest.TestCase):
             self.assertEqual(app.handle_model_command({'model_index': 0}), 2)
 
     def test_project_menu_picks_type_then_asks_name_and_folder(self):
-        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=6), \
+        with contextlib.redirect_stdout(io.StringIO()), patch.object(app, 'choose', return_value=7), \
              patch('builtins.input', side_effect=['demo', '']), patch.object(app, 'init_project', return_value='ok') as init:
             app.handle_project_command('/work')
         init.assert_called_once_with('django', 'demo', target_dir='/work')

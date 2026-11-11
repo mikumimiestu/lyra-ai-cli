@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.5
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.6
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,16 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.6 — Pembuatan project (`/project`)
+
+- **Aman dari injeksi:** perintah framework dijalankan tanpa shell, dan nama project divalidasi dulu (huruf, angka, `.`, `-`, `_`). Nama seperti `a; rm -rf ~` ditolak sebelum apa pun berjalan.
+- **Satu konfirmasi yang jujur:** dialog menampilkan perintah persis yang akan dijalankan. Sebelumnya ada dua konfirmasi dan sebagian perintah tersembunyi.
+- **Flag yang benar:** Next.js memakai `--disable-git` dan `--yes` (flag lama `--no-git` tidak valid), Vite tidak lagi menjalankan `npm install` ganda, Django dibuat di folder project dengan virtualenv sendiri.
+- **Tidak menggantung:** input ditutup supaya installer tidak menunggu tombol, Esc atau Ctrl+C menghentikan langkah yang berjalan, ada batas waktu.
+- **Gagal ya gagal:** langkah yang error dilaporkan beserta ujung lognya, dan hasil diperiksa (mis. `package.json`, `manage.py`, `artisan`) sebelum menyatakan berhasil.
+- **Cek alat:** kalau Node, Python, PHP, Composer, atau Flutter belum terpasang, Lyra memberi tahu dan menautkan halaman pemasangannya. Folder tujuan yang sudah berisi file tidak ditimpa.
+- **Tipe baru:** Svelte, Flask, dan Flutter (varian: `react-js`, `next-js`, `vue-js`, `svelte-ts`, `express-ts`).
 
 ### Perbaikan v2.12.5 — Windows dan editor yang hilang
 

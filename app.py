@@ -145,6 +145,8 @@ Daftar tool yang tersedia:
 - create_directory : Membuat folder baru.   Args: {{"dirpath": "path/ke/folder"}}
 - execute_command  : Jalankan terminal.     Args: {{"command": "perintah", "cwd": "/optional/path", "timeout": 600}}
 - init_project     : Scaffolding project baru (NON-INTERAKTIF, langsung jalan).
+                     Tipe: react, next, vue, svelte, node, express, fastapi, django, flask, laravel, php, flutter.
+                     Nama: huruf/angka/._- saja (Django: pengenal Python; Flutter: huruf kecil_dan_garis_bawah).
                      Args: {{"project_type": "TIPE", "project_name": "nama", "target_dir": "/optional"}}
 - save_memory      : Simpan fakta/catatan ke file memori ~/.amagi_memory.md. Args: {{"content": "catatan", "mode": "append"}}
 - read_memory      : Baca isi file memori ~/.amagi_memory.md. Args: {{}}
@@ -1038,10 +1040,15 @@ def handle_resume_command(user_input, active_cwd):
           + (f"; dibuat di {short_path(data['cwd'])}, folder aktif tidak berubah" if other else "") + f"{RESET}\n")
     return data
 
+def _validate_project(ptype, pname):
+    import tools as _tools
+    return _tools.validate_project_name(ptype, pname) if _tools.normalize_project_type(ptype) else None
+
+
 PROJECT_TYPES = [
-    ("react", "React"), ("next", "Next.js"), ("vue", "Vue"), ("laravel", "Laravel (PHP)"), ("php", "PHP polos"),
-    ("express", "Express (Node.js)"), ("django", "Django (Python)"), ("fastapi", "FastAPI (Python)"),
-    ("flutter", "Flutter"), ("node", "Node.js polos"),
+    ("react", "React"), ("next", "Next.js"), ("vue", "Vue"), ("svelte", "Svelte"), ("laravel", "Laravel (PHP)"),
+    ("php", "PHP polos"), ("express", "Express (Node.js)"), ("django", "Django (Python)"),
+    ("fastapi", "FastAPI (Python)"), ("flask", "Flask (Python)"), ("flutter", "Flutter"), ("node", "Node.js polos"),
 ]
 
 def handle_project_command(cwd):
@@ -1063,6 +1070,10 @@ def handle_project_command(cwd):
         target = pdir_input if pdir_input else cwd
         if not ptype or not pname:
             print(f"  {RED}Tipe dan nama project tidak boleh kosong.{RESET}\n")
+            return
+        problem = _validate_project(ptype, pname)
+        if problem:
+            print(f"  {RED}{problem}{RESET}\n")
             return
 
         print(f"\n  {DIM}Memulai scaffolding {ptype} project '{pname}' di {target}...{RESET}\n")

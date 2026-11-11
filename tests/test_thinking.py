@@ -227,7 +227,8 @@ class SpinnerTests(unittest.TestCase):
             tools.execute_command('echo test')
         factory.return_value.stop.assert_called()
         with contextlib.redirect_stdout(io.StringIO()), patch.object(tools, '_confirm_permission', return_value=True), \
-             patch.object(tools, 'Spinner') as factory, patch.object(tools, '_run_cmds_silent', side_effect=KeyboardInterrupt()), \
+             patch.object(tools, 'Spinner') as factory, patch.object(tools, '_run_step', side_effect=KeyboardInterrupt()), \
+             patch.object(tools, '_find_tool', return_value='/usr/bin/tool'), patch.object(tools.os.path, 'exists', return_value=False), \
              self.assertRaises(KeyboardInterrupt):
             tools.init_project('node', 'test-only')
         factory.return_value.stop.assert_called()
