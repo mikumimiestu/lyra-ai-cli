@@ -143,3 +143,42 @@ class CompactDialogTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class HeadingTests(unittest.TestCase):
+    def line(self, text):
+        formatted, _ = styling.format_markdown_line(text, {'in_code': False, 'lang': ''})
+        return styling.strip_ansi(formatted).strip()
+
+    def test_all_six_heading_levels_lose_their_hashes(self):
+        for level in range(1, 7):
+            self.assertEqual(self.line('#' * level + ' Manfaat Teoretis'), 'Manfaat Teoretis', level)
+
+    def test_closing_hashes_emphasis_and_extra_spaces_are_cleaned(self):
+        self.assertEqual(self.line('## Judul ##'), 'Judul')
+        self.assertEqual(self.line('#### **Manfaat** Praktis'), 'Manfaat Praktis')
+        self.assertEqual(self.line('###   Banyak spasi   '), 'Banyak spasi')
+
+    def test_things_that_are_not_headings_stay_as_typed(self):
+        for text in ('#hashtag', '####### terlalu dalam', 'C# adalah bahasa', '#'):
+            self.assertIn(text.split()[0], self.line(text), text)
+        self.assertTrue(self.line('#hashtag').startswith('#hashtag'))
+        self.assertTrue(self.line('####### terlalu dalam').startswith('#######'))
+
+    def test_levels_look_different_and_code_comments_are_untouched(self):
+        if styling.USE_COLOR:
+            styles = {styling.format_markdown_line('#' * n + ' x', {'in_code': False, 'lang': ''})[0] for n in range(1, 6)}
+            self.assertEqual(len(styles), 5)
+        state = {'in_code': True, 'lang': 'python'}
+        formatted, _ = styling.format_markdown_line('#### komentar di dalam blok kode', state)
+        self.assertIn('#### komentar', styling.strip_ansi(formatted))
+
+    def test_streamed_answers_render_deep_headings_in_any_chunking(self):
+        text = 'Pembuka.\n#### Manfaat Teoretis\nMenambah referensi.\n##### Detail\nIsi.\n'
+        whole = styling.strip_ansi(render(text, 80, step=len(text), wrap=False))
+        self.assertNotIn('####', whole)
+        self.assertNotIn('#####', whole)
+        self.assertIn('Manfaat Teoretis', whole)
+        for step in (1, 3, 5):
+            self.assertEqual(styling.strip_ansi(render(text, 80, step=step, wrap=False)), whole, step)
+        self.assertEqual(len([l for l in whole.splitlines() if 'Manfaat' in l]), 1)

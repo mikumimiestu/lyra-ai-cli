@@ -1,7 +1,7 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  [kucing pixel art Nexara]    Lyra CLI  v2.12.2
+  [kucing pixel art Nexara]    Lyra CLI  v2.12.3
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -27,6 +27,10 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.3
+
+Judul markdown level 4 sampai 6 (`####`, `#####`, `######`) kini dirender sebagai judul, bukan tercetak dengan tanda pagarnya. Tiap level punya gaya sendiri, tanda pagar penutup (`## Judul ##`) dan penanda tebal di dalam judul dibersihkan, dan teks seperti `#hashtag` atau komentar di dalam blok kode tidak tersentuh.
 
 ### Baru di v2.12.2 — Maskot Nexara, teks yang rapi, dan dialog izin ringkas
 

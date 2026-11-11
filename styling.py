@@ -404,13 +404,14 @@ def format_markdown_line(line, state):
         highlighted = highlight_syntax(line, state['lang'])
         return f"  {COLOR_BORDER}{ui_symbol('│', '|')}{RESET} {highlighted}", state
 
-    # Headers
-    if line.startswith("# "):
-        return f"\n  {BOLD}{UNDERLINE}{COLOR_TITLE}{line[2:].strip()}{RESET}", state
-    elif line.startswith("## "):
-        return f"\n  {BOLD}{COLOR_TITLE}{line[3:].strip()}{RESET}", state
-    elif line.startswith("### "):
-        return f"\n  {BOLD}{COLOR_LYRA}{line[4:].strip()}{RESET}", state
+    # Headers (# to ######; closing hashes and emphasis markers are dropped, the heading style already stands out)
+    heading = re.match(r'^(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$', line)
+    if heading:
+        level = len(heading.group(1))
+        text = re.sub(r'\*\*|__', '', heading.group(2)).strip()
+        style = {1: BOLD + UNDERLINE + COLOR_TITLE, 2: BOLD + COLOR_TITLE, 3: BOLD + COLOR_LYRA,
+                 4: BOLD + COLOR_ACCENT}.get(level, BOLD + COLOR_DIM)
+        return f"\n  {style}{text}{RESET}", state
 
     # Lists
     bullet = re.match(r'^(\s*)[-*+]\s+(.*)', line)
@@ -1647,10 +1648,10 @@ class StreamRenderer:
     def _classify(self, text, final):
         if self.state['in_code']:
             return 'block'
-        if (re.match(r'^\s*\|', text) or re.match(r'^\s*```', text) or re.match(r'^#{1,3} ', text)
+        if (re.match(r'^\s*\|', text) or re.match(r'^\s*```', text) or re.match(r'^#{1,6}[ \t]', text)
                 or re.match(r'^\s*([-*_])\1\1', text)):
             return 'block'
-        if not final and len(text) < 4 and all(char in self._MARKER_CHARS for char in text):
+        if not final and len(text) < 7 and all(char in self._MARKER_CHARS for char in text):   # "###### " needs 7
             return None
         return 'inline'
 
