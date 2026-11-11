@@ -190,17 +190,38 @@ class ConsoleTests(unittest.TestCase):
             pipe.send_text('hello\r')
             self.assertEqual(editor.read(), 'hello')
 
-    def test_welcome_card_is_rounded_and_keeps_context(self):
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=80), \
-             patch.object(styling, 'unicode_terminal', return_value=True):
-            styling.render_header('Lyra Orpheus 6', 'medium', '/work')
-        plain = styling.strip_ansi(output.getvalue())
-        self.assertIn('╭', plain)
-        self.assertIn('╯', plain)
-        self.assertIn('Lyra Orpheus 6', plain)
-        widths = {styling.str_width(line.rstrip()) for line in plain.splitlines() if line.strip().startswith(('╭', '│', '╰'))}
-        self.assertEqual(len(widths), 1)
+    def test_sprite_data_is_well_formed(self):
+        self.assertEqual(len(styling.PET_SPRITE), 24)
+        self.assertEqual({len(row) for row in styling.PET_SPRITE}, {27})
+        used = {ch for row in styling.PET_SPRITE for ch in row} - {'.'}
+        self.assertTrue(used <= set(styling.PET_PALETTE), used - set(styling.PET_PALETTE))
+        for row in styling.PET_SPRITE:                                     # the face sits on the centre column
+            self.assertEqual(row, row[::-1], row)
+
+    def test_xterm256_mapping_is_close_to_the_requested_colour(self):
+        def rgb(index):
+            if index >= 232:
+                v = 8 + 10 * (index - 232)
+                return (v, v, v)
+            index -= 16
+            levels = (0, 95, 135, 175, 215, 255)
+            return levels[index // 36], levels[(index // 6) % 6], levels[index % 6]
+        for color in styling.PET_PALETTE.values():
+            near = rgb(styling._xterm256(color))
+            self.assertLess(sum((a - b) ** 2 for a, b in zip(color, near)) ** 0.5, 60, (color, near))
+        self.assertEqual(styling._xterm256((0, 0, 0)), 16)
+        self.assertEqual(styling._xterm256((255, 255, 255)), 231)
+
+    def test_colour_depth_follows_the_terminal(self):
+        with patch.object(styling, 'USE_COLOR', True):
+            for env, expected in (({'COLORTERM': 'truecolor', 'TERM': 'xterm'}, 24), ({'COLORTERM': '24bit', 'TERM': 'xterm'}, 24),
+                                  ({'COLORTERM': '', 'TERM': 'xterm-256color', 'TERM_PROGRAM': 'Apple_Terminal'}, 8),
+                                  ({'COLORTERM': '', 'TERM': 'xterm-direct'}, 24), ({'COLORTERM': '', 'TERM': 'xterm', 'TERM_PROGRAM': 'iTerm.app'}, 24),
+                                  ({'COLORTERM': '', 'TERM': 'vt100', 'TERM_PROGRAM': ''}, 0)):
+                with patch.dict(os.environ, env):
+                    self.assertEqual(styling.color_depth(), expected, env)
+        with patch.object(styling, 'USE_COLOR', False):
+            self.assertEqual(styling.color_depth(), 0)
 
     def test_permission_box_shows_whole_command(self):
         output = io.StringIO()

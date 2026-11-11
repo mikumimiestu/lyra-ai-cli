@@ -93,46 +93,138 @@ if not sys.stdout.isatty() or 'NO_COLOR' in os.environ or os.environ.get('TERM')
                   'UNDERLINE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
         globals()[_name] = ''
 
-# ─── Logo ─────────────────────────────────────────────────────────────────────
-LOGO_LINES = [
-    "   ██╗  ██╗   ██╗██████╗  █████╗     ██████╗██╗     ██╗",
-    "   ██║  ╚██╗ ██╔╝██╔══██╗██╔══██╗   ██╔════╝██║     ██║",
-    "   ██║   ╚████╔╝ ██████╔╝███████║   ██║     ██║     ██║",
-    "   ██║    ╚██╔╝  ██╔══██╗██╔══██║   ██║     ██║     ██║",
-    "   ███████╗██║   ██║  ██║██║  ██║   ╚██████╗███████╗██║",
-    "   ╚══════╝╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝    ╚═════╝╚══════╝╚═╝",
+# ─── Mascot ───────────────────────────────────────────────────────────────────
+# Nexara's pet, drawn as pixel art: 27 columns x 24 pixel rows, two pixel rows per terminal row
+# (half-block characters). Letters index PET_PALETTE; "." is transparent so the terminal's own
+# background shows through.
+PET_PALETTE = {
+    'i': (38, 44, 82),
+    'w': (252, 252, 255),
+    's': (214, 221, 243),
+    'b': (36, 104, 240),
+    'l': (120, 176, 255),
+    'k': (30, 31, 42),
+    'p': (255, 176, 190),
+    'r': (232, 84, 104),
+}
+PET_SPRITE = [
+    '....iwi.............iwi....',
+    '....iwwi...........iwwi....',
+    '....iwbwii.......iiwbwi....',
+    '...iwwbbwwiiiiiiiwwbbwwi...',
+    '...iwwbbbwwwwwwwwwbbbwwi...',
+    '...iwbbwwwwwwwwwwwwwbbwi...',
+    '...iwbwwwwwwwwwwwwwwwbwi...',
+    '..iwwwwwwwwwwwwwwwwwwwwwi..',
+    '..iwwwwwwwwwwlwwwwwwwwwwi..',
+    '..iwwwwwwwwwlwlwwwwwwwwwi..',
+    '.iwwwwwwwwwwwwwwwwwwwwwwwi.',
+    '.iwwwwwwwiiwwwwwiiwwwwwwwi.',
+    '.iwwwwwwiwwiwwwiwwiwwwwwwi.',
+    '.iwwwwwwwwwwwwwwwwwwwwwwwi.',
+    '.iwwwppwwwwiiiiiwwwwppwwwi.',
+    '..iwwwwwwwwirrriwwwwwwwwi..',
+    '..iwwwwwwwwwiiiwwwwwwwwwi..',
+    '...iwwwwwwwwwwwwwwwwwwwi...',
+    '....isssssssssssssssssi....',
+    '....iwwkkkkkklkkkkkkwwi....',
+    '.....iwkkkkklklkkkkkwi.....',
+    '....iwwwkkkklklkkkkwwwi....',
+    '...ibwwwbwwwwwwwwwbwwwbi...',
+    '....iwwwiiwwwwwwwiiwwwi....',
 ]
+PET_COLS = len(PET_SPRITE[0])
+PET_ROWS = len(PET_SPRITE) // 2
+MASCOT_MIN_COLS = 66        # sprite + gap + enough room for the text beside it
+MASCOT_MIN_ROWS = 22
 
-def print_logo():
-    # Keep the original identity; use a readable wordmark on narrow terminals.
-    if not unicode_terminal() or get_terminal_width() < max(len(line) for line in LOGO_LINES) + 2:
-        print(f"\n  {BOLD}{COLOR_LYRA}LYRA CLI{RESET}\n")
-        return
-    max_y = len(LOGO_LINES) - 1
-    max_x = max(len(line) for line in LOGO_LINES) - 1
 
-    scores = []
-    for y, line in enumerate(LOGO_LINES):
-        for x, char in enumerate(line):
-            if char not in (" ", "╗", "╔", "╝", "╚"):
-                score = x * 1.2 + (max_y - y) * 1.0
-                scores.append(score)
-    min_score = min(scores) if scores else 0
-    max_score = max(scores) if scores else 1
+def color_depth():
+    """24 for true colour, 8 for 256 colours, 0 when colour is off."""
+    if not USE_COLOR:
+        return 0
+    term = os.environ.get('TERM', '').lower()
+    colorterm = os.environ.get('COLORTERM', '').lower()
+    if (colorterm in ('truecolor', '24bit') or term.endswith('-direct')
+            or os.environ.get('TERM_PROGRAM', '') in ('iTerm.app', 'WezTerm', 'vscode', 'ghostty')):
+        return 24
+    return 8 if '256color' in term else 0
 
-    print()
-    for y, line in enumerate(LOGO_LINES):
-        colored = ""
-        for x, char in enumerate(line):
-            if char == " ":
-                colored += " "
+
+def _xterm256(rgb):
+    """Nearest colour in the xterm 256 palette (6x6x6 cube or grey ramp)."""
+    levels = (0, 95, 135, 175, 215, 255)
+    cube = [min(range(6), key=lambda i: abs(levels[i] - v)) for v in rgb]
+    cube_rgb = tuple(levels[i] for i in cube)
+    grey_index = max(0, min(23, round((sum(rgb) / 3 - 8) / 10)))
+    grey = 8 + 10 * grey_index
+
+    def distance(c):
+        return sum((a - b) ** 2 for a, b in zip(rgb, c))
+    if distance((grey, grey, grey)) < distance(cube_rgb):
+        return 232 + grey_index
+    return 16 + 36 * cube[0] + 6 * cube[1] + cube[2]
+
+
+def _pet_color(rgb, foreground, depth):
+    layer = 38 if foreground else 48
+    if depth >= 24:
+        return f"\033[{layer};2;{rgb[0]};{rgb[1]};{rgb[2]}m"
+    return f"\033[{layer};5;{_xterm256(rgb)}m"
+
+
+def pet_art(depth=None):
+    """The pet as PET_ROWS terminal rows, each exactly PET_COLS cells wide.
+
+    Colour codes are only written when they change from the previous cell, which keeps a row to a few
+    hundred bytes instead of repeating the same escape for every cell.
+    """
+    depth = color_depth() if depth is None else depth
+    rows = []
+    for y in range(0, len(PET_SPRITE), 2):
+        parts, state = [], (None, None)
+        for x in range(PET_COLS):
+            top, bottom = PET_PALETTE.get(PET_SPRITE[y][x]), PET_PALETTE.get(PET_SPRITE[y + 1][x])
+            if top and bottom:
+                char, fg, bg = '▀', top, bottom
+            elif top:
+                char, fg, bg = '▀', top, None
+            elif bottom:
+                char, fg, bg = '▄', bottom, None
             else:
-                score = x * 1.2 + (max_y - y) * 1.0
-                t = (score - min_score) / (max_score - min_score) if max_score > min_score else 0.5
-                r, g, b = get_gradient_color(t)
-                colored += rgb_to_ansi(r, g, b) + BOLD + char
-        print(colored + RESET)
-    print()
+                char, fg, bg = ' ', None, None
+            if (fg, bg) != state:
+                if state != (None, None):
+                    parts.append(RESET)
+                if fg:
+                    parts.append(_pet_color(fg, True, depth))
+                if bg:
+                    parts.append(_pet_color(bg, False, depth))
+                state = (fg, bg)
+            parts.append(char)
+        rows.append(''.join(parts) + (RESET if state != (None, None) else ''))
+    return rows
+
+
+def terminal_rows():
+    try:
+        return os.get_terminal_size().lines
+    except Exception:
+        return 24
+
+
+def mascot_fits():
+    """The pet needs colour, unicode block characters and enough room; otherwise the header is text only."""
+    return (color_depth() > 0 and unicode_terminal() and get_terminal_width() >= MASCOT_MIN_COLS
+            and terminal_rows() >= MASCOT_MIN_ROWS)
+
+
+def gradient_text(text):
+    """Blue-purple-pink wordmark (the old logo's colours); plain text when colour is off."""
+    if not USE_COLOR:
+        return text
+    last = max(1, len(text) - 1)
+    return ''.join(rgb_to_ansi(*get_gradient_color(i / last)) + BOLD + ch for i, ch in enumerate(text)) + RESET
 
 
 # ─── Terminal Layout Helpers ──────────────────────────────────────────────────
@@ -199,23 +291,46 @@ def render_box(lines, width, color=None, title=''):
 
 
 def render_permission_box(title, details):
-    """Rounded confirmation dialog. Commands are shown in full so nothing is approved unseen."""
-    width = box_width(88)
-    room = width - 4
-    key_w = max((len(str(k)) for k in details), default=8) + 2
-    body = []
-    for key, value in details.items():
-        is_code = str(key).lower() in ('command', 'script', 'perintah')
-        chunks = [part for part in str(value).split('\n') if part.strip()] or ['']
-        for n, chunk in enumerate(chunks):
-            for m, piece in enumerate(wrap_text_display_width(chunk, max(8, room - key_w))):
-                label = f'{COLOR_DIM}{str(key):<{key_w}}{RESET}' if n == 0 and m == 0 else ' ' * key_w
-                shown = highlight_syntax(piece) if is_code else f'{BOLD}{piece}{RESET}'
-                body.append(label + shown)
-    caution = ui_symbol('⚠', '!')
+    """Compact confirmation, a few lines instead of a framed box.
+
+    A command is always shown in full (never approve what you cannot read), next to a bar. Everything
+    else (folder, limits, sizes) is folded into one dim line.
+    """
+    width = max(30, get_terminal_width() - 6)
+    heading = title[len('Konfirmasi '):] if title.startswith('Konfirmasi ') else title
+    bar = f"{YELLOW}{ui_symbol('│', '|')}{RESET}"
     print()
-    for line in render_box(body, width, color=YELLOW, title=f'{BOLD}{YELLOW}{caution} {title}{RESET}'):
-        print('  ' + line)
+    print(f"  {BOLD}{YELLOW}{ui_symbol('⚠', '!')} {heading}{RESET}")
+    info, warnings = [], []
+    for key, value in details.items():
+        text = str(value)
+        if key == 'Perintah':
+            for chunk in [part for part in text.split('\n') if part.strip()] or ['']:
+                for piece in wrap_text_display_width(chunk, width):
+                    print(f"    {bar} {highlight_syntax(piece)}")
+        elif key == 'Direktori':
+            info.append('di ' + short_path(text))
+        elif key == 'Timeout':
+            info.append('batas ' + text.replace(' detik', ' dtk'))
+        elif key in ('Path', 'Target Path'):
+            info.append(short_path(text))
+        elif key == 'Penggantian':
+            info.append(text + ' penggantian')
+        elif key == 'Peringatan':
+            warnings.append(text)
+        elif key == 'Operasi' and 'Perintah' not in details:
+            info.insert(0, f"{BOLD}{text}{RESET}{COLOR_DIM}")
+        elif key in ('Ukuran', 'Nama', 'Tipe Project'):
+            info.append(text)
+        else:
+            info.append(f"{key.lower()} {text}")
+    if info:
+        line = (' ' + ui_symbol('·', '-') + ' ').join(info)
+        for piece in wrap_text_display_width(strip_ansi(line), width) if '\033' not in line else [line]:
+            print(f"    {COLOR_DIM}{piece}{RESET}")
+    for text in warnings:
+        for piece in wrap_text_display_width(text, width):
+            print(f"    {YELLOW}{ui_symbol('⚠', '!')} {piece}{RESET}")
 
 
 # ─── Markdown Renderer & Code Highlighting ────────────────────────────────────
@@ -493,23 +608,29 @@ def render_markdown_table(table_lines, max_width=None):
 # ─── Full-Page Header & Footer Helpers ─────────────────────────────────────────
 
 def render_header(model_name, reasoning_effort, active_cwd, supports_reasoning=True):
-    """Logo stays above; a rounded welcome card (Claude/Codex style) carries the session context."""
+    """Welcome header: Nexara's pet beside four lines of context, or the same four lines as plain text."""
     from config import VERSION
-    width = box_width(72, 28)
-    room = width - 4
-    reasoning = 'reasoning ' + reasoning_effort if supports_reasoning else 'tanpa reasoning'
     sep = ui_symbol('·', '/')
-    body = [
-        f'{COLOR_TITLE}Mau ngerjain apa hari ini?{RESET}',
-        f'{COLOR_DIM}{fit_console_text(model_name + " " + sep + " " + reasoning, room)}{RESET}',
-        f'{COLOR_DIM}{fit_console_text(short_path(active_cwd), room)}{RESET}',
+    model = model_name[len('Lyra '):] if model_name.startswith('Lyra ') else model_name
+    reasoning = reasoning_effort if supports_reasoning else 'tanpa reasoning'
+    art = pet_art() if mascot_fits() else None
+    room = max(10, get_terminal_width() - 4 - (PET_COLS + 3 if art else 0))
+    mark = ui_symbol('✦', '*') + ' ' if art is None else ''
+    lines = [
+        f"{mark}{gradient_text('Lyra CLI')}{COLOR_DIM}  v{VERSION}{RESET}",
+        f"{COLOR_TITLE}Mau ngerjain apa hari ini?{RESET}",
+        f"{COLOR_DIM}{fit_console_text(f'{model} {sep} {reasoning} {sep} {short_path(active_cwd)}', room)}{RESET}",
+        f"{COLOR_DIM}{fit_console_text(f'/ perintah {sep} @ file {sep} /help', room)}{RESET}",
     ]
-    title = f'{BOLD}{COLOR_LYRA}{ui_symbol("✦", "*")} Lyra CLI{RESET} {COLOR_DIM}v{VERSION}{RESET}'
     print()
-    for line in render_box(body, width, color=COLOR_BORDER, title=title):
-        print('  ' + line)
-    tips = f'/ perintah {sep} @ file {sep} Alt+Enter baris baru {sep} /help'
-    print(f"  {COLOR_DIM}{fit_console_text(tips, width)}{RESET}")
+    if art is None:
+        for line in lines:
+            print('  ' + line)
+    else:
+        top = 3                                               # the text block sits slightly above the middle
+        for index, row in enumerate(art):
+            text = lines[index - top] if 0 <= index - top < len(lines) else ''
+            print('  ' + row + ('   ' + text if text else ''))
     print()
 
 
@@ -1456,14 +1577,24 @@ def render_diff_preview(before, after, filename):
 class StreamRenderer:
     """Incremental markdown renderer for streamed answers.
 
-    Paragraph, list and quote text is written as it arrives, token by token, with `**bold**`,
+    Paragraph, list and quote text is written as it arrives, word by word, with `**bold**`,
     `*italic*` and `code` styled on the fly. Headings, rules, code blocks and tables need the whole
     line to format correctly, so those are written once their line is complete.
+
+    With wrap=True long lines are broken at word boundaries and continuation lines keep the text
+    indent, instead of the terminal cutting a word in half and restarting at column 0.
     """
     _MARKER_CHARS = frozenset('#`-*+_>|0123456789. \t')
 
-    def __init__(self, write, format_line=None, render_table=None):
+    def __init__(self, write, format_line=None, render_table=None, wrap=False, width=None):
         self.write = write
+        self.wrap = wrap
+        self.width_fn = width or get_terminal_width
+        self.col = self.indent = 0          # columns used on this line / where wrapped text resumes
+        self.word = []                      # pieces of the word being built (text and zero-width style codes)
+        self.word_w = 0
+        self.word_style = ''
+        self.spaces = 0                     # spaces waiting to be written; dropped at a wrap or line end
         self.format_line = format_line or format_markdown_line
         self.render_table = render_table or render_markdown_table
         self.state = {'in_code': False, 'lang': ''}
@@ -1493,9 +1624,11 @@ class StreamRenderer:
             self.write(''.join(out))
 
     def abort(self):
-        """Interrupted mid-line: only make sure no style leaks into the next prompt."""
+        """Interrupted mid-line: show the word in progress and make sure no style leaks into the next prompt."""
         if self.mode == 'inline':
-            self.write(RESET)
+            out = []
+            self._flush_word(out)
+            self.write(''.join(out) + RESET)
 
     # -- line machinery -------------------------------------------------
     def _char(self, char, out):
@@ -1545,10 +1678,12 @@ class StreamRenderer:
             self._finish_block(out)
         elif self.mode == 'inline':
             if self.star:
-                out.append('*')
+                self._text('*', out)
+            self._flush_word(out)
             out.append(RESET + '\n')
         self.line = ''
         self.mode = None
+        self.col = self.indent = self.spaces = 0
         self.bold = self.italic = self.code = self.star = False
 
     # -- block lines ----------------------------------------------------
@@ -1609,6 +1744,7 @@ class StreamRenderer:
             self.skip_ws = True
         else:
             out.append(f"{lead}{self.base}")
+        self.col = self.indent = str_width(''.join(out[-1:]))
         for char in rest:
             self._inline(char, out)
 
@@ -1623,7 +1759,53 @@ class StreamRenderer:
         return style
 
     def _restyle(self, out):
-        out.append(RESET + self._style())
+        self._code(RESET + self._style(), out)
+
+    # -- word wrapping --------------------------------------------------
+    def _limit(self):
+        return max(20, self.width_fn() - 1)     # never touch the last column: terminals wrap there
+
+    def _code(self, codes, out):
+        """Zero-width output (colours); travels with the word so a wrap cannot separate them."""
+        if not self.wrap:
+            out.append(codes)
+            return
+        if not self.word:
+            self.word_style = self._style()
+        self.word.append(codes)
+
+    def _text(self, char, out):
+        if not self.wrap:
+            out.append(char)
+            return
+        if char in ' \t':
+            self._flush_word(out)
+            if self.col > self.indent:
+                self.spaces += 1
+            return
+        if not self.word:
+            self.word_style = self._style()
+        self.word.append(char)
+        self.word_w += char_width(char)
+        if self.word_w >= self._limit() - self.indent:       # one word longer than a whole line: cut it
+            self._flush_word(out, force=True)
+
+    def _flush_word(self, out, force=False):
+        if not self.word:
+            return
+        if self.col > self.indent and self.col + self.spaces + self.word_w > self._limit():
+            out.append(RESET + '\n' + ' ' * self.indent + self.word_style)      # wrap: the gap is dropped
+            self.col = self.indent
+        elif self.spaces:
+            out.append(' ' * self.spaces)
+            self.col += self.spaces
+        self.spaces = 0
+        out.append(''.join(self.word))
+        self.col += self.word_w
+        self.word, self.word_w = [], 0
+        if force:
+            out.append(RESET + '\n' + ' ' * self.indent + self._style())
+            self.col = self.indent
 
     def _inline(self, char, out):
         if self.skip_ws:
@@ -1643,7 +1825,7 @@ class StreamRenderer:
                 self.italic = True
                 self._restyle(out)
             else:
-                out.append('*')
+                self._text('*', out)
         if char == '*' and not self.code:
             self.star = True
             return
@@ -1651,9 +1833,9 @@ class StreamRenderer:
             self.code = not self.code
             if self.code:
                 self._restyle(out)
-                out.append(' ')
+                self._text(' ', out)
             else:
-                out.append(' ')
+                self._text(' ', out)
                 self._restyle(out)
             return
-        out.append(char)
+        self._text(char, out)

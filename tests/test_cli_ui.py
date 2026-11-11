@@ -109,19 +109,62 @@ class AppTests(unittest.TestCase):
         self.assertNotIn('Perintah Utama:', plain)
         self.assertLess(len(plain.splitlines()), 14)
 
-    def test_original_logo_is_preserved(self):
+    def header(self, width=100, rows=40, depth=24, unicode=True, model='Lyra Orpheus 6', effort='medium', cwd='/work'):
         output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=100), patch.object(styling, 'unicode_terminal', return_value=True):
-            styling.print_logo()
-        lines = [line for line in styling.strip_ansi(output.getvalue()).splitlines() if line.strip()]
-        self.assertEqual(lines, styling.LOGO_LINES)
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=width), \
+             patch.object(styling, 'terminal_rows', return_value=rows), patch.object(styling, 'color_depth', return_value=depth), \
+             patch.object(styling, 'unicode_terminal', return_value=unicode):
+            styling.render_header(model, effort, cwd)
+        return output.getvalue()
 
-    def test_logo_adapts_to_narrow_terminals(self):
+    def test_pet_mascot_sits_beside_four_lines_of_context(self):
+        raw = self.header()
+        plain = styling.strip_ansi(raw)
+        lines = [line for line in plain.splitlines() if line.strip()]
+        self.assertEqual(len(lines), styling.PET_ROWS)
+        art = [line for line in lines if '▀' in line or '▄' in line]
+        self.assertEqual(len(art), styling.PET_ROWS)
+        text = ' '.join(plain.split())
+        for expected in ('Lyra CLI v' + VERSION, 'Mau ngerjain apa hari ini?', 'Orpheus 6 · medium · /work', '/ perintah · @ file · /help'):
+            self.assertIn(expected, text)
+        self.assertNotIn('██', plain)                       # the old ASCII banner is gone
+        self.assertNotIn('╭', plain)                        # and so is the welcome card
+        self.assertTrue(all(styling.str_width(line) <= 100 for line in lines))
+        self.assertIn('\x1b[38;2;', raw)                    # true colour
+
+    def test_each_art_row_is_exactly_as_wide_as_the_sprite(self):
+        for depth in (24, 8):
+            rows = styling.pet_art(depth)
+            self.assertEqual(len(rows), styling.PET_ROWS)
+            self.assertEqual({styling.str_width(row) for row in rows}, {styling.PET_COLS})
+
+    def test_256_colour_terminals_get_palette_codes_instead_of_rgb(self):
+        raw = self.header(depth=8)
+        self.assertIn('\x1b[38;5;', raw)
+        self.assertNotIn('\x1b[38;2;\x1b', raw.split('Lyra')[0].split('\n', 2)[1])
+        self.assertNotIn('\x1b[48;2;', raw.split('Lyra')[0])
+
+    def test_header_falls_back_to_text_when_there_is_no_room_colour_or_unicode(self):
+        for kwargs in (dict(width=60), dict(rows=18), dict(depth=0), dict(unicode=False)):
+            plain = styling.strip_ansi(self.header(**kwargs))
+            lines = [line for line in plain.splitlines() if line.strip()]
+            self.assertEqual(len(lines), 4, kwargs)
+            self.assertNotIn('▀', plain)
+            self.assertIn('Lyra CLI v' + VERSION, ' '.join(plain.split()))
+            self.assertIn('Orpheus 6', plain)
+        self.assertIn('Orpheus 6 / medium / /work', ' '.join(styling.strip_ansi(self.header(unicode=False)).split()))
+
+    def test_long_context_is_trimmed_to_the_room_beside_the_pet(self):
+        plain = styling.strip_ansi(self.header(width=70, cwd='/very/long/' + 'folder/' * 12))
+        self.assertTrue(all(styling.str_width(line) <= 69 for line in plain.splitlines()))
+
+    def test_model_name_is_shown_without_the_lyra_prefix(self):
         output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=30):
-            styling.print_logo()
-        self.assertIn('LYRA CLI', output.getvalue())
-        self.assertNotIn('██', output.getvalue())
+        with contextlib.redirect_stdout(output), patch.object(styling, 'get_terminal_width', return_value=60):
+            styling.render_header('Lyra Luma Flash', 'medium', '/work', supports_reasoning=False)
+        text = ' '.join(styling.strip_ansi(output.getvalue()).split())
+        self.assertIn('Luma Flash · tanpa reasoning · /work', text)
+        self.assertNotIn('Lyra Luma', text)
 
     def test_main_commands_and_eof_without_api_or_daemon(self):
         import app

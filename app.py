@@ -18,7 +18,7 @@ import time
 from styling import (
     RESET, BOLD, DIM, ITALIC, WHITE, GREEN, RED, YELLOW, CYAN,
     COLOR_USER, COLOR_LYRA, COLOR_BORDER, COLOR_DIM, COLOR_TITLE,
-    COLOR_ACCENT, print_logo, rgb_to_ansi, hex_to_rgb,
+    COLOR_ACCENT, rgb_to_ansi, hex_to_rgb,
     get_terminal_width, strip_ansi, str_width, format_markdown_line,
     render_header, render_footer_bar, render_markdown_table,
     render_full_divider, format_clean_thinking_line, parse_markdown_table
@@ -617,7 +617,8 @@ def stream_ai_response(headers, data, model_info=None):
 
     # Lambdas resolve the formatters at call time so they stay patchable.
     renderer = StreamRenderer(emit, lambda line, state: format_markdown_line(line, state),
-                              lambda lines: render_markdown_table(lines))
+                              lambda lines: render_markdown_table(lines),
+                              wrap=sys.stdout.isatty())
 
     try:
         spinner.start()
@@ -1227,7 +1228,6 @@ def _run_session(live=None):
     threading.Thread(target=_bg_check_update, daemon=True).start()
 
     # Compact Lyra welcome
-    print_logo()
     render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd, MODELS[model_idx]["supports_reasoning"])
     editor = TerminalInput(lambda: {
         "model": MODELS[model_idx]["name"],

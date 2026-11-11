@@ -62,7 +62,7 @@ class LivePtyTests(unittest.TestCase):
             run.send('halo\r')
             run.pump(2.2)
         history = '\n'.join(run.screen.history())
-        self.assertIn('██╗', history)                       # the logo scrolled up, not erased
+        self.assertIn('Lyra CLI v', ' '.join(history.split()))      # the header scrolled up, not erased
         self.assertGreaterEqual(history.count('Halo! Ini'), 4)
         self.assertGreater(len(run.screen.scrollback), 10)
         self.assertGreaterEqual(self.composer_row(run), self.ROWS - 9)     # once the screen is full it stays pinned at the bottom
@@ -102,7 +102,7 @@ class LivePtyTests(unittest.TestCase):
                 self.assertTrue(run.wait_for('PROCESS-ENDED', 6, where=lambda: run.raw), run.screen.text())
                 text = run.screen.text()
                 self.assertIn('Selamat tinggal', text)
-                for leftover in ('Halo! Ini', '██╗', '› halo', 'tanya dulu'):
+                for leftover in ('Halo! Ini', 'Mau ngerjain', '▀', '› halo', 'tanya dulu'):
                     self.assertNotIn(leftover, text)
 
     def test_plain_ascii_terminals_work_in_both_modes(self):
@@ -180,6 +180,63 @@ class LivePtyTests(unittest.TestCase):
         run.pump(5.0)
         self.assertNotIn('pesan antre', run.screen.text())
         self.assertEqual(len(self.api.requests), 3)
+
+    def test_long_answers_wrap_at_word_boundaries_and_the_dialog_stays_small(self):
+        sentence = ('Cache terbesar yang relatif aman dibersihkan adalah Google Codex pip TypeScript dan node-gyp totalnya sekitar 1,4 GB. '
+                    'Cache ini akan dibuat ulang otomatis saat aplikasinya digunakan lagi dan seterusnya sampai baris ini panjang sekali.')
+        self.api.custom += [
+            (lambda last: last == 'panjang', [(word + ' ', 0.01) for word in sentence.split()] + [('\n', 0.01)]),
+            (lambda last: last == 'cache', self.tool_call('execute_command', command="du -sh \"$HOME/Library/Caches\" 2>/dev/null || true; "
+                                                           "find \"$HOME/Library/Caches\" -maxdepth 1 | sort -rh | head -20; df -h /")),
+        ]
+        run = PtyRun(self.api.url, rows=40, cols=60)
+        self.addCleanup(run.close)
+        self.assertTrue(run.wait_for('Shift+Tab', 10))
+        run.send('panjang\r')
+        self.assertTrue(run.wait_for('seterusnya', 8), run.screen.text())
+        run.pump(1.0)
+        lines = run.screen.lines()
+        start = next(i for i, l in enumerate(lines) if l.startswith('● Cache terbesar'))
+        end = max(i for i, l in enumerate(lines) if 'panjang sekali' in l or 'sekali.' in l)
+        answer = lines[start:end + 1]
+        self.assertGreaterEqual(len(answer), 3)
+        self.assertTrue(all(len(l) <= 59 for l in answer), answer)
+        self.assertTrue(all(l.startswith('  ') and not l.startswith('   ') for l in answer[1:]), answer)   # hanging indent
+        self.assertEqual(' '.join(l.strip().lstrip('●').strip() for l in answer).split(), sentence.split())  # no word cut
+        run.send('cache\r')
+        self.assertTrue(run.wait_for('Izinkan?', 8), run.screen.text())
+        lines = [l for l in run.screen.lines()]
+        heading = next(i for i, l in enumerate(lines) if 'Eksekusi Perintah' in l)
+        prompt = next(i for i, l in enumerate(lines) if 'Izinkan?' in l)
+        self.assertLessEqual(prompt - heading, 7, '\n'.join(lines[heading:prompt + 1]))     # compact: no frame, no filler rows
+        self.assertTrue(all('╭' not in l for l in lines[heading:prompt + 1]))               # no frame around the dialog
+        self.assertIn('batas', ' '.join(lines[heading:prompt]))
+        run.send('n\r')
+
+    def header_of(self, env=None, rows=30, cols=100):
+        run = PtyRun(self.api.url, rows=rows, cols=cols, env=env)
+        self.addCleanup(run.close)
+        self.assertTrue(run.wait_for('Shift+Tab', 10), run.screen.text())
+        return run.screen.lines()
+
+    def test_header_shows_the_pet_in_colour_terminals_and_plain_text_elsewhere(self):
+        def blocks(lines):
+            return [l for l in lines if '▀' in l or '▄' in l]
+
+        def squash(line):
+            return ' '.join(line.split())
+        for name, env in (('true colour', {'COLORTERM': 'truecolor'}), ('256 colours', {'COLORTERM': '', 'TERM_PROGRAM': 'Apple_Terminal'})):
+            lines = self.header_of(env)
+            self.assertEqual(len(blocks(lines)), 12, (name, lines[:16]))
+            title = next(l for l in lines if 'Lyra CLI' in l)
+            self.assertTrue('▀' in title or '▄' in title, title)               # beside the pet, not under it
+            self.assertIn('v', squash(title))
+            self.assertTrue(all(len(l) <= 100 for l in lines))
+        lines = self.header_of({'NO_COLOR': '1'})
+        self.assertFalse(blocks(lines))
+        self.assertTrue(any(squash(l).startswith('✦ Lyra CLI v') for l in lines))
+        self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, cols=60)))      # too narrow for the pet
+        self.assertFalse(blocks(self.header_of({'COLORTERM': 'truecolor'}, rows=18)))      # too short for the pet
 
     def test_classic_mode_is_still_available(self):
         run = PtyRun(self.api.url, rows=self.ROWS, cols=100, env={'LYRA_CLASSIC': '1'})

@@ -1,14 +1,10 @@
 # Amagi CLI - AI Terminal Client & Agent
 
 ```text
-  [Logo ASCII LYRA CLI asli]
-
-  ╭─ ✦ Lyra CLI v2.12.1 ──────────────────────────────────╮
-  │ Mau ngerjain apa hari ini?                           │
-  │ Lyra Orpheus 6 · reasoning medium                    │
-  │ ~/projects/amagi-cli                                 │
-  ╰──────────────────────────────────────────────────────╯
-  / perintah · @ file · Alt+Enter baris baru · /help
+  [kucing pixel art Nexara]    Lyra CLI  v2.12.2
+                               Mau ngerjain apa hari ini?
+                               Orpheus 6 · medium · ~/projects/amagi-cli
+                               / perintah · @ file · /help
 
    › jelaskan @app.py                                      ← pita abu penuh lebar
 
@@ -31,6 +27,13 @@
 - **Kuota token harian per tier** (reset tengah malam): Free 20K, Student 40K, Pro 100K, Plus 200K, Ultra 400K, Ultimate 800K. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.2 — Maskot Nexara, teks yang rapi, dan dialog izin ringkas
+
+- **Maskot di awal:** logo ASCII "LYRA CLI" diganti kucing peliharaan Nexara, maskot AstByte, dalam pixel art (12 baris) di samping empat baris info: versi, sapaan, model + reasoning + folder, dan petunjuk singkat. Kartu sambutan lama ikut digantikan.
+- **Cadangan otomatis:** tanpa warna (`NO_COLOR`), tanpa unicode (`LYRA_ASCII=1`), terminal lebih sempit dari 66 kolom, atau lebih pendek dari 22 baris, header tampil sebagai empat baris teks tanpa gambar. Terminal 256 warna (misalnya Terminal.app macOS) memakai palet 256 warna; terminal truecolor memakai warna penuh.
+- **Jawaban dibungkus per kata:** teks panjang tidak lagi terpotong di tengah kata dan jatuh ke kolom pertama. Baris lanjutan mengikuti indentasi paragraf, daftar bernomor, butir, dan kutipan, dan gaya tebal/miring/kode tetap terjaga setelah baris dipatahkan. Blok kode dan tabel tidak diubah susunannya, dan keluaran yang di-pipe tidak dibungkus.
+- **Dialog izin ringkas:** tanpa kotak. Judul satu baris, perintah ditampilkan **utuh** di samping garis, lalu satu baris info (`di ~/folder · batas 120 dtk`). Operasi file cukup dua baris, misalnya `Mengubah File · ~/proj/app.py · 1 penggantian`.
 
 ### Baru di v2.12.1 — Bantuan per perintah, mode satu kali tanya, dan footer lebih informatif
 
