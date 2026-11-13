@@ -211,10 +211,26 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ Kredensial berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.12.8"
+VERSION = "2.12.9"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
-RAW_VERSION_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/version.txt"
-RAW_BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
+# Where releases come from, in order. The first source publishes SHA256SUMS next to the files, and /update
+# refuses files that do not match it. GitHub is the fallback (no checksum file, HTTPS only). Older installs only
+# know GitHub, which is why releases are still pushed there too.
+PRIMARY_UPDATE_URL = "https://astbyte.my.id/"
+GITHUB_UPDATE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/"
+RAW_VERSION_URL = f"{GITHUB_UPDATE_URL}version.txt"      # kept for older callers
+RAW_BASE_URL = GITHUB_UPDATE_URL
+
+
+def update_sources():
+    """[(base url, publishes SHA256SUMS)], most trusted first. LYRA_UPDATE_URL replaces the primary (mirrors, tests)."""
+    override = os.environ.get("LYRA_UPDATE_URL", "").strip()
+    primary = override or PRIMARY_UPDATE_URL
+    if not primary.endswith("/"):
+        primary += "/"
+    return [(primary, True), (GITHUB_UPDATE_URL, False)]
+
+
 FILES_TO_UPDATE = ["app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py", "setup.py", "version.txt"]
 
 def parse_version_tuple(v_str: str):
@@ -227,19 +243,21 @@ def parse_version_tuple(v_str: str):
 
 def check_remote_version(timeout=4.0):
     """
-    Cek versi terbaru dari GitHub secara langsung.
+    Cek versi terbaru dari server rilis (lalu GitHub bila server utama tidak terjangkau).
     Return: (has_update: bool, latest_version_str: str)
     """
     try:
         import requests
-        resp = requests.get(RAW_VERSION_URL, timeout=timeout)
-        if resp.status_code == 200:
-            remote_v = resp.text.strip()
-            if parse_version_tuple(remote_v) > parse_version_tuple(VERSION):
-                return True, remote_v
-            return False, remote_v
     except Exception:
-        pass
+        return False, VERSION
+    for base, _checksums in update_sources():
+        try:
+            resp = requests.get(f"{base}version.txt", timeout=timeout)
+            if resp.status_code == 200 and parse_version_tuple(resp.text) != (0, 0, 0):
+                remote_v = resp.text.strip()
+                return parse_version_tuple(remote_v) > parse_version_tuple(VERSION), remote_v
+        except Exception:
+            continue
     return False, VERSION
 
 REQUIRED_PACKAGES = (("requests", "requests"), ("prompt_toolkit", "prompt_toolkit>=3.0.36,<4"))
@@ -265,11 +283,56 @@ def install_packages(specs, timeout=300):
     return False, lines[-1] if lines else f"pip keluar dengan kode {done.returncode}"
 
 
+def parse_checksums(text):
+    """{filename: sha256} from a SHA256SUMS file ("<hash>  <name>" per line)."""
+    sums = {}
+    for line in str(text).splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and len(parts[0]) == 64:
+            sums[parts[1].lstrip("*")] = parts[0].lower()
+    return sums
+
+
+def fetch_release(base, verify, timeout=10):
+    """Download every file of a release into memory. Returns ({name: bytes}, None) or (None, reason).
+
+    Nothing is written to disk here, so a failure half way never leaves a mix of old and new files.
+    """
+    import hashlib
+    import requests
+    sums = {}
+    if verify:
+        try:
+            resp = requests.get(f"{base}SHA256SUMS", timeout=timeout)
+        except Exception as e:
+            return None, f"SHA256SUMS: {e}"
+        if resp.status_code != 200:
+            return None, f"SHA256SUMS tidak tersedia (HTTP {resp.status_code})"
+        sums = parse_checksums(resp.text)
+    files = {}
+    for fname in FILES_TO_UPDATE:
+        try:
+            resp = requests.get(f"{base}{fname}", timeout=timeout)
+        except Exception as e:
+            return None, f"{fname}: {e}"
+        if resp.status_code != 200:
+            return None, f"{fname} (HTTP {resp.status_code})"
+        content = resp.content if isinstance(resp.content, (bytes, bytearray)) else str(resp.text).encode("utf-8")
+        if verify:
+            expected = sums.get(fname)
+            if not expected:
+                return None, f"{fname} tidak ada di SHA256SUMS"
+            if hashlib.sha256(content).hexdigest() != expected:
+                return None, f"checksum {fname} tidak cocok (file rusak atau diubah)"
+        files[fname] = bytes(content)
+    return files, None
+
+
 def perform_update(target_dir=None):
     """
-    Download file terbaru dari GitHub ke direktori instalasi.
+    Unduh rilis terbaru ke direktori instalasi: server utama dengan verifikasi SHA256SUMS, GitHub sebagai cadangan.
+    File baru ditulis hanya setelah semuanya lengkap dan lolos verifikasi.
     """
-    import requests
     if not target_dir:
         install_dir = os.path.expanduser("~/.amagi-cli")
         if os.path.exists(os.path.join(install_dir, "app.py")):
@@ -277,26 +340,34 @@ def perform_update(target_dir=None):
         else:
             target_dir = os.path.dirname(os.path.abspath(__file__))
 
+    files, source, problems = None, "", []
+    for base, verify in update_sources():
+        files, reason = fetch_release(base, verify)
+        if files is not None:
+            source = base.split("/")[2]
+            break
+        problems.append(f"{base.split('/')[2]}: {reason}")
+    if files is None:
+        return False, "Gagal mengunduh pembaruan. " + "; ".join(problems)
+
     os.makedirs(target_dir, exist_ok=True)
-    updated_files = []
-    for fname in FILES_TO_UPDATE:
-        url = f"{RAW_BASE_URL}{fname}"
-        try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code == 200:
-                dest = os.path.join(target_dir, fname)
-                with open(dest, "w", encoding="utf-8") as f:
-                    f.write(resp.text)
-                updated_files.append(fname)
-            else:
-                return False, f"Gagal mengunduh {fname} (HTTP {resp.status_code})"
-        except Exception as e:
-            return False, f"Gagal mengunduh {fname}: {e}"
+    try:
+        staged = []
+        for fname, content in files.items():
+            dest = os.path.join(target_dir, fname)
+            temp = dest + ".new"
+            with open(temp, "wb") as f:
+                f.write(content)
+            staged.append((temp, dest))
+        for temp, dest in staged:
+            os.replace(temp, dest)
+    except OSError as e:
+        return False, f"Gagal menulis file pembaruan: {e}"
 
     note = ""
     missing = missing_packages()      # versions before 2.3 shipped without prompt_toolkit; /update only copies files
     if missing:
         ok, detail = install_packages(missing)
         note = f"; paket {', '.join(missing)} " + ("ikut dipasang" if ok else f"belum terpasang ({detail})")
-    return True, f"Berhasil memperbarui {len(updated_files)} file ke {target_dir}{note}"
-
+    checked = "terverifikasi" if source != GITHUB_UPDATE_URL.split("/")[2] else "tanpa checksum"
+    return True, f"Berhasil memperbarui {len(files)} file ke {target_dir} (dari {source}, {checked}){note}"

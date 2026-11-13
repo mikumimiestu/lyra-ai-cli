@@ -61,7 +61,7 @@ class InstallerSmokeTests(unittest.TestCase):
 
     def test_installers_run_in_local_mode_when_the_files_are_next_to_them(self):
         self.assertIn('Test-Path "app.py"', read('install.ps1'))
-        self.assertIn('[ -f "$file" ]', read('install.sh'))
+        self.assertIn('[ -f app.py ] && [ -f styling.py ]', read('install.sh'))
 
     def test_the_syntax_check_in_ci_matches_the_documented_minimum(self):
         self.assertIn('feature_version=(3, 7)', read('.github/workflows/ci.yml'))

@@ -5,6 +5,8 @@ set -e
 
 # Configuration
 GITHUB_REPO="mikumimiestu/lyra-ai-cli"
+BASE_URL="${AMAGI_BASE_URL:-https://astbyte.my.id}"      # main download server (publishes SHA256SUMS)
+FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "memory.py" "reminder.py" "version.txt")
 INSTALL_DIR="$HOME/.amagi-cli"
 
 # Colors
@@ -145,6 +147,50 @@ ensure_python() {
     exit 1
 }
 
+# ── Download: main server with checksum verification, GitHub as fallback ─────────
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    fi
+}
+
+# fetch_release BASE_URL DIR VERIFY(1|0): every file into DIR; with VERIFY each must match SHA256SUMS.
+fetch_release() {
+    local base="$1" dir="$2" verify="$3" f want got
+    if [ "$verify" = "1" ]; then
+        curl -fsS --max-time 30 -o "$dir/SHA256SUMS" "$base/SHA256SUMS" || return 1
+    fi
+    for f in "${FILES[@]}"; do
+        curl -fsS --max-time 60 -o "$dir/$f" "$base/$f" || return 1
+        if [ "$verify" = "1" ]; then
+            want="$(awk -v n="$f" '$2 == n {print $1}' "$dir/SHA256SUMS")"
+            got="$(sha256_of "$dir/$f")"
+            [ -n "$want" ] || { echo -e "${RED}$f tidak ada di SHA256SUMS.${RESET}" >&2; return 1; }
+            if [ -z "$got" ]; then
+                echo -e "${YELLOW}Tidak ada sha256sum/shasum, $f tidak diverifikasi.${RESET}" >&2
+            elif [ "$got" != "$want" ]; then
+                echo -e "${RED}Checksum $f tidak cocok (file rusak atau diubah).${RESET}" >&2
+                return 1
+            fi
+        fi
+    done
+}
+
+# download_release DIR: main server first (verified), then GitHub (HTTPS only).
+download_release() {
+    local dir="$1"
+    echo -e "${CYAN}Mengunduh dari ${BASE_URL}...${RESET}"
+    if fetch_release "${BASE_URL%/}" "$dir" 1; then
+        echo -e "${GREEN}✓ Terverifikasi dengan SHA256SUMS${RESET}"
+        return 0
+    fi
+    echo -e "${YELLOW}Server utama tidak bisa dipakai, mengunduh dari GitHub...${RESET}"
+    rm -f "$dir"/*
+    fetch_release "https://raw.githubusercontent.com/$GITHUB_REPO/main" "$dir" 0
+}
+
 # Tests source this file to reach the functions above without installing anything.
 if [ "${AMAGI_INSTALL_SOURCE_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
@@ -162,22 +208,25 @@ echo -e "${CYAN}Creating installation directory at ${INSTALL_DIR}...${RESET}"
 mkdir -p "$INSTALL_DIR"
 
 # 3. Retrieve files
-# If files exist in current directory, we copy them (Local Dev Mode)
-# Otherwise, we download them from raw.githubusercontent.com
-FILES=("app.py" "styling.py" "spinner.py" "tools.py" "config.py" "memory.py" "reminder.py" "version.txt")
-LOCAL_MODE=false
-
-for file in "${FILES[@]}"; do
-    if [ -f "$file" ]; then
+# If the files are in the current directory, copy them (Local Dev Mode); otherwise download the release.
+if [ -f app.py ] && [ -f styling.py ]; then
+    echo -e "${YELLOW}Running in Local installation mode...${RESET}"
+    for file in "${FILES[@]}"; do
         echo -e "Copying $file..."
         cp "$file" "$INSTALL_DIR/$file"
-    else
-        echo -e "Downloading $file from GitHub..."
-        curl -sSf -o "$INSTALL_DIR/$file" "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
+    done
+else
+    STAGING="$(mktemp -d)"
+    if ! download_release "$STAGING"; then
+        rm -rf "$STAGING"
+        echo -e "${RED}Gagal mengunduh file Amagi CLI. Periksa koneksi internet lalu coba lagi.${RESET}"
+        exit 1
     fi
-done
-
-
+    for file in "${FILES[@]}"; do
+        cp "$STAGING/$file" "$INSTALL_DIR/$file"
+    done
+    rm -rf "$STAGING"
+fi
 
 # 4. Set up Virtual Environment
 echo -e "${CYAN}Setting up virtual environment...${RESET}"

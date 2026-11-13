@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.8
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.9
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,13 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Perbaikan v2.12.9 — Server rilis sendiri dan verifikasi checksum
+
+- **Sumber unduhan baru:** installer (`install.sh`, `install.ps1`) dan `/update` kini mengambil file dari `https://astbyte.my.id`. GitHub tetap menjadi cadangan otomatis bila server itu tidak terjangkau. Untuk mirror lain, atur `LYRA_UPDATE_URL` (update) atau `AMAGI_BASE_URL` (installer).
+- **Verifikasi `SHA256SUMS`:** setiap file diperiksa dengan checksum dari server utama. File yang tidak cocok atau tidak terdaftar ditolak, lalu Lyra mencoba GitHub. Tanpa checksum yang valid, server utama tidak dipercaya begitu saja.
+- **Update atomik:** semua file diunduh dan diperiksa dulu di memori, baru ditulis. Kegagalan di tengah jalan tidak lagi meninggalkan campuran file lama dan baru.
+- **Untuk yang merilis:** `deploy/setup-vps.sh` menyiapkan nginx dan SSL di VPS, `deploy/publish.sh` mengunggah rilis beserta `SHA256SUMS`. Instalasi lama masih memantau GitHub, jadi rilis tetap di-push ke GitHub juga.
 
 ### Perbaikan v2.12.8 — Kuota 5 jam dan mingguan
 
@@ -224,10 +231,10 @@ Logo ASCII Lyra CLI dengan gradasi biru–ungu–pink dikembalikan pada tampilan
 Editor interaktif memakai `prompt_toolkit`. Instalasi baru memasang dependensinya secara otomatis. Jika dependency belum tersedia atau input diarahkan melalui pipe, Lyra memakai input teks sederhana; jalankan installer terbaru untuk mendapat editor penuh.
 
 ```sh
-curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
+curl -fsSL https://astbyte.my.id/install.sh | bash
 ```
 
-> Installer mengambil script dan source aplikasi langsung dari GitHub (`raw.githubusercontent.com`, branch `main`), jadi tidak bergantung pada domain atau firewall server sendiri.
+> Installer dan `/update` mengambil file dari `astbyte.my.id` dan memverifikasinya dengan `SHA256SUMS`. Kalau server itu tidak terjangkau, otomatis memakai GitHub (`raw.githubusercontent.com`, branch `main`) sebagai cadangan. Alamat cadangan manual: `curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash`.
 
 [Bahasa Indonesia](#indonesian-versi-bahasa-indonesia) | [English](#english-version)
 
@@ -264,12 +271,12 @@ Amagi CLI adalah klien chat AI berbasis terminal yang modern dan interaktif untu
 
 **Untuk macOS / Linux (Terminal):**
 ```bash
-curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
+curl -fsSL https://astbyte.my.id/install.sh | bash
 ```
 
 **Untuk Windows (PowerShell):**
 ```powershell
-iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
+iwr -useb https://astbyte.my.id/install.ps1 | iex
 ```
 
 #### Metode 2: Menggunakan Pip (Semua OS - Cross Platform)
@@ -351,12 +358,12 @@ Amagi CLI is a modern, interactive terminal chat client for **AstByte Lyra**. It
 
 **For macOS / Linux (Terminal):**
 ```bash
-curl -sSf https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.sh | bash
+curl -fsSL https://astbyte.my.id/install.sh | bash
 ```
 
 **For Windows (PowerShell):**
 ```powershell
-iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
+iwr -useb https://astbyte.my.id/install.ps1 | iex
 ```
 
 #### Method 2: Via Pip (Cross-Platform)

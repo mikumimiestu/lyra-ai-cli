@@ -1,10 +1,11 @@
 # PowerShell Installer for Amagi CLI on Windows
 # Usage: powershell -ExecutionPolicy Bypass -File install.ps1
-# Or online: iwr -useb https://raw.githubusercontent.com/mikumimiestu/lyra-ai-cli/main/install.ps1 | iex
+# Or online: iwr -useb https://astbyte.my.id/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
 $GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
+$BASE_URL = if ($env:AMAGI_BASE_URL) { $env:AMAGI_BASE_URL.TrimEnd("/") } else { "https://astbyte.my.id" }
 $INSTALL_DIR = "$HOME\.amagi-cli"
 $FILES = @("app.py", "styling.py", "spinner.py", "tools.py", "config.py", "memory.py", "reminder.py", "version.txt")
 
@@ -113,23 +114,65 @@ if (!(Test-Path -Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR | Out-Null
 }
 
-# 3. Retrieve files (Local vs GitHub Raw)
+# 3. Retrieve files (Local vs download)
+# Download every file of a release into $Dir; with $Verify each must match SHA256SUMS. Returns $true or $false.
+function Get-Release([string]$Base, [string]$Dir, [bool]$Verify) {
+    try {
+        $sums = @{}
+        if ($Verify) {
+            $sumsPath = Join-Path $Dir "SHA256SUMS"
+            Invoke-WebRequest -Uri "$Base/SHA256SUMS" -OutFile $sumsPath -UseBasicParsing
+            foreach ($line in Get-Content $sumsPath) {
+                $parts = $line.Trim() -split "\s+", 2
+                if ($parts.Count -eq 2) { $sums[$parts[1].TrimStart("*")] = $parts[0].ToLower() }
+            }
+        }
+        foreach ($file in $FILES) {
+            $path = Join-Path $Dir $file
+            Invoke-WebRequest -Uri "$Base/$file" -OutFile $path -UseBasicParsing
+            if ($Verify) {
+                $actual = (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLower()
+                if (-not $sums.ContainsKey($file)) { Write-Host "$file tidak ada di SHA256SUMS." -ForegroundColor Red; return $false }
+                if ($sums[$file] -ne $actual) { Write-Host "Checksum $file tidak cocok (file rusak atau diubah)." -ForegroundColor Red; return $false }
+            }
+        }
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 $LOCAL_MODE = $false
 if ((Test-Path "app.py") -and (Test-Path "styling.py")) {
     Write-Host "Running in Local installation mode..." -ForegroundColor Yellow
     $LOCAL_MODE = $true
 }
 
-foreach ($file in $FILES) {
-    $targetPath = Join-Path $INSTALL_DIR $file
-    if ($LOCAL_MODE) {
+if ($LOCAL_MODE) {
+    foreach ($file in $FILES) {
         Write-Host "Copying $file..."
-        Copy-Item -Path $file -Destination $targetPath -Force
-    } else {
-        Write-Host "Downloading $file from GitHub..."
-        $url = "https://raw.githubusercontent.com/$GITHUB_REPO/main/$file"
-        Invoke-WebRequest -Uri $url -OutFile $targetPath -UseBasicParsing
+        Copy-Item -Path $file -Destination (Join-Path $INSTALL_DIR $file) -Force
     }
+} else {
+    $staging = Join-Path ([IO.Path]::GetTempPath()) ("amagi-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Write-Host "Mengunduh dari $BASE_URL..." -ForegroundColor Cyan
+    if (Get-Release $BASE_URL $staging $true) {
+        Write-Host "Terverifikasi dengan SHA256SUMS" -ForegroundColor Green
+    } else {
+        Write-Host "Server utama tidak bisa dipakai, mengunduh dari GitHub..." -ForegroundColor Yellow
+        Get-ChildItem $staging | Remove-Item -Force
+        if (-not (Get-Release "https://raw.githubusercontent.com/$GITHUB_REPO/main" $staging $false)) {
+            Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "Gagal mengunduh file Amagi CLI. Periksa koneksi internet lalu coba lagi." -ForegroundColor Red
+            exit 1
+        }
+    }
+    foreach ($file in $FILES) {
+        Copy-Item -Path (Join-Path $staging $file) -Destination (Join-Path $INSTALL_DIR $file) -Force
+    }
+    Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # 4. Set up Virtual Environment

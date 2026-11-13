@@ -166,7 +166,13 @@ class PackageRepairTests(unittest.TestCase):
     def update(self, missing, install=(True, 'terpasang')):
         folder = tempfile.mkdtemp(prefix='lyra-update-')
         self.addCleanup(__import__('shutil').rmtree, folder, True)
-        with patch('requests.get', return_value=Mock(status_code=200, text='# isi')), patch.object(config, 'missing_packages', return_value=missing), \
+        body = b'# isi'
+        sums = ''.join(f'{__import__("hashlib").sha256(body).hexdigest()}  {name}\n' for name in config.FILES_TO_UPDATE)
+
+        def get(url, timeout=0):
+            data = sums.encode() if url.endswith('SHA256SUMS') else body
+            return Mock(status_code=200, content=data, text=data.decode())
+        with patch('requests.get', side_effect=get), patch.object(config, 'missing_packages', return_value=missing), \
              patch.object(config, 'install_packages', return_value=install) as pip:
             result = config.perform_update(target_dir=folder)
         return result, pip
