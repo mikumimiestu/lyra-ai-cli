@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.10
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.11
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,15 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.11 — Kendalikan Lyra dari Telegram
+
+- **`/telegram`:** hubungkan Lyra ke bot Telegram milikmu, sehingga selama CLI terbuka kamu bisa menyuruh Lyra bekerja dari phone dan menerima jawaban akhirnya (plus satu baris ringkasan langkah) di chat. Cara memasang: buat bot lewat **@BotFather**, jalankan `/telegram setup` dan tempel tokennya (tidak terlihat di layar), lalu kirim kode 6 digit yang tampil ke bot dengan `/pair KODE`. Pilihan lain: `/telegram pair` (kode baru), `on`, `off`, `putus` (lepas chat), `hapus` (hapus token dari komputer), dan `status`.
+- **Aman secara bawaan:** hanya satu chat pribadi yang dilayani, dan siapa pun yang lain tidak dibalas sama sekali. Kode pairing berlaku 10 menit, hanya sekali pakai, dan terkunci setelah 5 tebakan salah. Pesan yang dikirim saat CLI tertutup diabaikan.
+- **Izin tetap di tanganmu:** setiap penulisan file atau perintah dari Telegram meminta izin lewat tombol **Izinkan / Tolak** di chat, tidak pernah otomatis (mode AUTO SEMUA tidak berlaku), dan otomatis ditolak bila tidak dijawab dalam 3 menit. Perintah berbahaya (`rm -rf`, `sudo`, force push, dan sejenisnya) langsung ditolak dan hanya bisa disetujui di terminal. Dari Telegram hanya `/status`, `/stop` (hentikan pekerjaan), dan `/help` yang tersedia; perintah menu lain tetap dari terminal.
+- **Yang perlu diketahui:** isi chat melewati server Telegram dan tidak terenkripsi ujung ke ujung. Satu bot untuk satu CLI. Saat ini hanya di macOS dan Linux (konsol live); Windows belum didukung. Kalau tokennya bocor, cabut lewat `/revoke` di BotFather lalu jalankan `/telegram hapus`.
+- **File konfigurasi lebih privat:** `~/.amagi_cli_config.json` (berisi API key dan token bot) kini disimpan dengan izin hanya-pengguna (0600), dan file lama diperbaiki izinnya pada penyimpanan berikutnya.
+- **Untuk yang merilis:** `deploy/publish.sh` kini mengunggah isi commit terakhir, bukan isi folder kerja, sehingga perubahan yang belum di-commit tidak ikut ke server.
 
 ### Baru di v2.12.10 — Dokumen Office dan pemeriksaan sintaks
 
@@ -336,6 +345,7 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | `/login` | Masuk dengan akun AstByte |
 | `/logout` | Keluar dari akun AstByte |
 | `/kuota` | Lihat sisa token (jendela 5 jam dan mingguan) |
+| `/telegram` | Kendalikan Lyra dari Telegram saat CLI terbuka (`setup`, `pair`, `on`, `off`, `putus`, `hapus`) |
 | `/reset-key` | Atur ulang ASTBYTE_API_KEY |
 | `/help` | Tampilkan daftar bantuan lengkap |
 | `exit` / `quit` | Keluar dari aplikasi |

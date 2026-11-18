@@ -13,14 +13,22 @@ FILES=(app.py styling.py spinner.py tools.py config.py memory.py reminder.py set
 [ "${DRY_RUN:-0}" = "1" ] || [ -n "$VPS" ] || { echo "Isi VPS, contoh: VPS='root@alamat-vps' PORT=22 bash deploy/publish.sh" >&2; exit 1; }
 for f in "${FILES[@]}" version.txt; do [ -f "$f" ] || { echo "File tidak ada: $f" >&2; exit 1; }; done
 
-# Versi di version.txt harus sama dengan config.py, supaya klien tidak menarik versi yang salah.
-CONFIG_VERSION="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' config.py)"
-FILE_VERSION="$(tr -d '[:space:]' < version.txt)"
-[ "$CONFIG_VERSION" = "$FILE_VERSION" ] || { echo "version.txt ($FILE_VERSION) berbeda dari config.py ($CONFIG_VERSION)." >&2; exit 1; }
-
+# Yang dirilis adalah isi COMMIT TERAKHIR (HEAD), bukan isi folder kerja. Dengan begitu perubahan yang belum di-commit
+# (fitur yang masih dikerjakan) tidak pernah ikut ke server, dan server selalu sama dengan yang ada di GitHub.
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "Jalankan dari dalam repositori git." >&2; exit 1; }
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-cp "${FILES[@]}" version.txt "$STAGE/"
+for f in "${FILES[@]}" version.txt; do
+    git show "HEAD:$f" > "$STAGE/$f" 2>/dev/null || { echo "File tidak ada di commit terakhir: $f" >&2; exit 1; }
+done
+DIRTY="$(git status --porcelain -- "${FILES[@]}" version.txt | sed 's/^...//' | tr '\n' ' ')"
+[ -z "$DIRTY" ] || echo "Catatan: perubahan belum di-commit TIDAK ikut dirilis: $DIRTY" >&2
+
+# Versi di version.txt harus sama dengan config.py (keduanya dari commit yang sama), supaya klien tidak menarik versi yang salah.
+CONFIG_VERSION="$(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$STAGE/config.py")"
+FILE_VERSION="$(tr -d '[:space:]' < "$STAGE/version.txt")"
+[ "$CONFIG_VERSION" = "$FILE_VERSION" ] || { echo "version.txt ($FILE_VERSION) berbeda dari config.py ($CONFIG_VERSION)." >&2; exit 1; }
+
 if command -v sha256sum >/dev/null 2>&1; then HASH=(sha256sum); else HASH=(shasum -a 256); fi
 ( cd "$STAGE" && "${HASH[@]}" "${FILES[@]}" version.txt > SHA256SUMS )
 chmod 644 "$STAGE"/*      # rsync -a membawa izin ini ke server; flag --chmod tidak didukung rsync bawaan macOS

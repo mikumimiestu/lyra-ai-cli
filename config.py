@@ -23,8 +23,13 @@ def load_config():
 def save_config(config: dict):
     """Simpan seluruh config ke file."""
     try:
-        with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        descriptor = os.open(CONFIG_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)     # holds the API key and bot token
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4)
+        try:
+            os.chmod(CONFIG_PATH, 0o600)
+        except OSError:
+            pass
     except Exception as e:
         print(f"  {RED}Warning: Gagal menyimpan config: {e}{RESET}")
 
@@ -211,7 +216,7 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ Kredensial berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.12.10"
+VERSION = "2.12.11"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 # Where releases come from, in order. The first source publishes SHA256SUMS next to the files, and /update
 # refuses files that do not match it. GitHub is the fallback (no checksum file, HTTPS only). Older installs only

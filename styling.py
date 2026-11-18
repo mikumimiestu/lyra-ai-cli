@@ -789,6 +789,7 @@ COMMANDS = [
     ('/mode', 'Atur persetujuan: tanya, edit, atau semua'),
     ('/restart', 'Mulai ulang Lyra (setelah update)'),
     ('/status', 'Lihat ringkasan sesi dan konfigurasi'),
+    ('/telegram', 'Kendalikan Lyra dari Telegram saat CLI terbuka'),
     ('/todos', 'Lihat daftar tugas yang sedang berjalan'),
     ('/details', 'Buka detail aktivitas terakhir'),
     ('/model', 'Pilih model Lyra'),
@@ -865,6 +866,11 @@ COMMAND_DETAILS = {
                'examples': ['/login'], 'notes': ['Password tidak pernah diketik di CLI.', 'Memberi kuota token harian sesuai tier akunmu.']},
     '/logout': {'usage': '/logout', 'desc': 'Keluar dari akun AstByte di perangkat ini.',
                 'examples': ['/logout'], 'notes': ['Pakai /login atau /reset-key untuk masuk lagi.']},
+    '/telegram': {'usage': '/telegram [setup|pair|on|off|putus|hapus]', 'desc': 'Menghubungkan Lyra ke bot Telegram milikmu, sehingga selama CLI terbuka kamu bisa menyuruh Lyra bekerja dari phone. Jawaban akhir dikirim balik ke chat itu.',
+                  'examples': ['/telegram setup', '/telegram off'],
+                  'notes': ['Buat bot lewat @BotFather, tempel tokennya di /telegram setup, lalu kirim kode yang tampil ke bot. Hanya satu chat pribadi yang dilayani; yang lain diabaikan.',
+                            'Setiap penulisan file atau perintah dari Telegram meminta izin lewat tombol Izinkan/Tolak, tidak pernah otomatis. Perintah berbahaya ditolak dan hanya bisa disetujui di terminal.',
+                            'Pesan bot Telegram tidak terenkripsi ujung ke ujung: isinya melewati server Telegram. Hanya di macOS dan Linux; satu bot untuk satu CLI.']},
     '/kuota': {'usage': '/kuota', 'desc': 'Menampilkan sisa token harian, tier, waktu reset, dan apakah saldo developer aktif sebagai cadangan.',
                'aliases': ['/quota'], 'examples': ['/kuota'], 'notes': ['Hanya untuk login akun. Persentase sisa juga tampil di footer.']},
     '/reset-key': {'usage': '/reset-key', 'desc': 'Menghapus API key tersimpan lalu meminta key pengganti.',
@@ -2084,12 +2090,17 @@ ADD_BG = rgb_bg(20, 62, 36) if IS_DARK else rgb_bg(209, 250, 224)
 DEL_BG = rgb_bg(82, 28, 34) if IS_DARK else rgb_bg(254, 215, 215)
 
 
+LAST_DIFF = None      # plain text of the diff last shown; remote approvals send it to the phone
+
+
 def render_diff_preview(before, after, filename):
     """Line-numbered diff with red/green bars, like Claude Code's edit preview."""
     import difflib
     diff = list(difflib.unified_diff(before.splitlines(), after.splitlines(), lineterm='', n=2))
     added = sum(1 for line in diff if line.startswith('+') and not line.startswith('+++'))
     removed = sum(1 for line in diff if line.startswith('-') and not line.startswith('---'))
+    global LAST_DIFF
+    LAST_DIFF = {'file': filename, 'text': '\n'.join(line for line in diff if not line.startswith(('---', '+++', '@@')))[:2000]}
     connector = ui_symbol('⎿', 'L')
     new_file = not before
     head = 'File baru' if new_file else 'Perubahan'

@@ -8,6 +8,10 @@ if _current_dir not in sys.path:
 
 import requests
 import json
+import styling as styling_module
+import hmac
+import secrets
+import getpass
 import re
 import io
 import contextlib
@@ -35,7 +39,7 @@ from tools import (
     create_directory, init_project, DEFAULT_TIMEOUT,
     get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
     tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList,
-    APPROVAL, APPROVAL_LABELS, edit_file, search, UNDO, undo_last, describe_undo_stack, edit_document, create_document, fill_template
+    APPROVAL, APPROVAL_LABELS, edit_file, search, UNDO, undo_last, describe_undo_stack, edit_document, create_document, fill_template, is_dangerous_command
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
@@ -641,6 +645,357 @@ def show_quota(config):
         print(f"  Cadangan {DIM}mati. Aktifkan di web: Pengaturan → Amagi CLI{RESET}\n")
 
 
+# ─── Telegram: drive Lyra from a phone while this CLI is open ────────────────
+# Long polling from this process (no server, no webhook). One paired private chat only; everyone else is ignored.
+# Permission prompts for work that started on Telegram go to Telegram as Allow/Deny buttons, never auto-approve,
+# and dangerous commands are refused outright (approve those at the terminal).
+class RemoteText(str):
+    """A message that arrived over Telegram, so the session loop knows where the answer must go."""
+    remote = True
+
+
+class TelegramError(Exception):
+    def __init__(self, message, code=None):
+        super().__init__(message)
+        self.code = code
+
+
+def telegram_api_base():
+    return os.environ.get('LYRA_TELEGRAM_API', 'https://api.telegram.org').rstrip('/')
+
+
+def telegram_call(token, method, payload=None, timeout=15, session=None):
+    """One Bot API request. Errors never contain the token."""
+    url = f"{telegram_api_base()}/bot{token}/{method}"
+    try:
+        resp = (session or requests).post(url, json=payload or {}, timeout=timeout)
+    except requests.RequestException as error:
+        raise TelegramError(str(error).replace(token, '***')) from None
+    try:
+        data = resp.json()
+    except ValueError:
+        raise TelegramError(f"HTTP {resp.status_code}", resp.status_code) from None
+    if not data.get('ok'):
+        raise TelegramError(f"{data.get('error_code', resp.status_code)}: {data.get('description', '')}".replace(token, '***'),
+                            data.get('error_code', resp.status_code))
+    return data.get('result')
+
+
+def telegram_split(text, size=3900, limit=8):
+    """Telegram refuses messages over 4096 characters: cut on line breaks, at most `limit` parts."""
+    text = str(text).strip() or '(selesai, tanpa teks)'
+    parts = []
+    while text and len(parts) < limit:
+        if len(text) <= size:
+            parts.append(text)
+            text = ''
+            break
+        cut = text.rfind('\n', 0, size)
+        cut = cut if cut > size // 2 else size
+        parts.append(text[:cut].rstrip())
+        text = text[cut:].lstrip('\n')
+    if text:
+        parts[-1] += '\n… (jawaban dipotong, selebihnya ada di terminal)'
+    return parts
+
+
+STEP_WORDS = (('membaca', ('read_file', 'list_directory', 'search')),
+              ('mengubah', ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template')),
+              ('menjalankan', ('execute_command', 'init_project')))
+
+
+def telegram_steps(steps):
+    parts = []
+    for word, names in STEP_WORDS:
+        count = sum(1 for step in steps if step in names)
+        if count:
+            parts.append(f"{word} {count}")
+    return '🔧 ' + ', '.join(parts) if parts else ''
+
+
+def telegram_approval_text(title, details, kind):
+    lines = [f"🔐 Izin diperlukan: {title.replace('Konfirmasi ', '')}"]
+    for key, value in details.items():
+        text = str(value)
+        if key == 'Perintah':
+            lines.append(f"Perintah:\n{text[:1500]}" + ('\n… (dipotong)' if len(text) > 1500 else ''))
+        else:
+            lines.append(f"{key}: {text[:300]}")
+    preview = getattr(styling_module, 'LAST_DIFF', None)
+    if kind == 'edit' and preview and preview.get('text'):
+        lines.append("Perubahan:\n" + preview['text'][:1200])
+    return '\n'.join(lines)[:3800]
+
+
+class TelegramBridge:
+    POLL_TIMEOUT = 25
+    PAIR_TTL = 600
+    APPROVAL_TTL = 180
+    MAX_AGE = 300           # messages older than this (sent while Lyra was closed) are ignored
+
+    def __init__(self, config, notify=None, status=None, live=None):
+        self.config = config
+        self.notify = notify or (lambda text: None)
+        self.status = status or (lambda: '')
+        self.live = live or LIVE
+        self._stop = threading.Event()
+        self._thread = None
+        self._typing = None
+        self._offset = 0
+        self._pairing = None
+        self._approvals = {}
+        self._lock = threading.RLock()
+        self._session = requests.Session()
+        self.remote_turn = False
+        self.running = False
+        self.ready = threading.Event()          # set once the backlog from while Lyra was closed has been dropped
+
+    # -- state --------------------------------------------------------------
+    @property
+    def token(self):
+        return self.config.get('telegram_token') or ''
+
+    @property
+    def chat_id(self):
+        return self.config.get('telegram_chat_id')
+
+    @property
+    def paired(self):
+        return bool(self.token and self.chat_id)
+
+    def _api(self, method, payload=None, timeout=15):
+        return telegram_call(self.token, method, payload, timeout, self._session)
+
+    # -- lifecycle ------------------------------------------------------------
+    def start(self):
+        if self.running or not self.token:
+            return
+        self._stop.clear()
+        self.ready.clear()
+        self.running = True
+        self._thread = threading.Thread(target=self._poll, name='lyra-telegram', daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        self.running = False
+        self.end_turn()
+        for item in list(self._approvals.values()):
+            item['decision'] = False
+            item['event'].set()
+
+    def begin_pairing(self):
+        code = f"{secrets.randbelow(1000000):06d}"
+        self._pairing = {'code': code, 'expires': time.time() + self.PAIR_TTL, 'failures': 0}
+        return code
+
+    def forget(self, everything=False):
+        self.config.pop('telegram_chat_id', None)
+        if everything:
+            for key in ('telegram_token', 'telegram_bot'):
+                self.config.pop(key, None)
+        self.config['telegram_enabled'] = False
+        save_config(self.config)
+        self.stop()
+
+    # -- sending --------------------------------------------------------------
+    def send(self, text, markup=None, chat=None):
+        payload = {'chat_id': chat or self.chat_id, 'text': str(text)[:4000]}
+        if markup:
+            payload['reply_markup'] = markup
+        try:
+            return self._api('sendMessage', payload)
+        except TelegramError as error:
+            self.notify(f"Telegram: gagal mengirim pesan ({error}).")
+            return None
+
+    def reply(self, text, steps=()):
+        parts = telegram_split(text)
+        footer = telegram_steps(steps)
+        if footer:
+            parts[-1] = parts[-1] + '\n\n' + footer
+        for part in parts:
+            self.send(part)
+
+    # -- turns that started on Telegram --------------------------------------------
+    def begin_turn(self):
+        import tools as tools_module
+        self.remote_turn = True
+        tools_module.REMOTE_APPROVER = self.approve
+        if self._typing is None or not self._typing.is_alive():
+            self._typing = threading.Thread(target=self._typing_loop, name='lyra-telegram-typing', daemon=True)
+            self._typing.start()
+
+    def end_turn(self):
+        import tools as tools_module
+        self.remote_turn = False
+        if tools_module.REMOTE_APPROVER == self.approve:
+            tools_module.REMOTE_APPROVER = None
+
+    def _typing_loop(self):
+        while self.remote_turn and not self._stop.is_set():
+            try:
+                self._api('sendChatAction', {'chat_id': self.chat_id, 'action': 'typing'})
+            except TelegramError:
+                pass
+            self._stop.wait(4)
+
+    def approve(self, title, details, kind):
+        """Ask on Telegram. False on denial, timeout, /stop or anything unclear."""
+        command = details.get('Perintah') if isinstance(details, dict) else None
+        if kind == 'command' and is_dangerous_command(command):
+            self.send("🛑 Perintah ini berbahaya (hapus massal, sudo, force push, dan sejenisnya), jadi ditolak otomatis. "
+                      "Setujui langsung di terminal jika memang perlu.")
+            return False
+        token = secrets.token_hex(6)
+        entry = {'event': threading.Event(), 'decision': False, 'message': None}
+        self._approvals[token] = entry
+        markup = {'inline_keyboard': [[{'text': '✅ Izinkan', 'callback_data': f'ok:{token}'},
+                                       {'text': '❌ Tolak', 'callback_data': f'no:{token}'}]]}
+        try:
+            sent = self.send(telegram_approval_text(title, details, kind), markup)
+            entry['message'] = (sent or {}).get('message_id')
+            if sent is None:
+                return False
+            deadline = time.time() + self.APPROVAL_TTL
+            while not entry['event'].wait(0.25):
+                if time.time() > deadline or self._stop.is_set() or self.live.cancel_requested():
+                    self._edit(entry, '⌛ Tidak dijawab, ditolak.')
+                    return False
+            return bool(entry['decision'])
+        finally:
+            self._approvals.pop(token, None)
+
+    def _edit(self, entry, text):
+        if entry.get('message'):
+            try:
+                self._api('editMessageText', {'chat_id': self.chat_id, 'message_id': entry['message'], 'text': text})
+            except TelegramError:
+                pass
+
+    # -- polling --------------------------------------------------------------
+    def _poll(self):
+        backoff, warned = 1, False
+        try:
+            last = self._api('getUpdates', {'offset': -1, 'timeout': 0}) or []
+            if last:
+                self._offset = last[-1]['update_id'] + 1          # whatever arrived while Lyra was closed is dropped
+        except TelegramError as error:
+            if error.code == 401:
+                self.ready.set()
+                return self._reject_token()
+        self.ready.set()
+        while not self._stop.is_set():
+            try:
+                updates = self._api('getUpdates', {'offset': self._offset, 'timeout': self.POLL_TIMEOUT,
+                                                   'allowed_updates': ['message', 'callback_query']},
+                                    timeout=self.POLL_TIMEOUT + 10)
+                backoff, warned = 1, False
+            except TelegramError as error:
+                if error.code == 401:
+                    return self._reject_token()
+                if error.code == 409 and not warned:
+                    warned = True
+                    self.notify("Telegram: bot ini sedang dipakai Lyra lain (satu bot untuk satu CLI). Menunggu...")
+                self._stop.wait(backoff)
+                backoff = min(30, backoff * 2)
+                continue
+            for update in updates or []:
+                self._offset = max(self._offset, update.get('update_id', 0) + 1)
+                try:
+                    self._handle(update)
+                except Exception:
+                    pass                      # a malformed update must never stop the loop
+
+    def _reject_token(self):
+        self.running = False
+        self.notify("Telegram: token bot ditolak (dicabut atau salah). Atur ulang dengan /telegram setup.")
+
+    def _handle(self, update):
+        if update.get('callback_query'):
+            return self._handle_callback(update['callback_query'])
+        message = update.get('message')
+        if not message:
+            return
+        chat = message.get('chat') or {}
+        sender = (message.get('from') or {}).get('id')
+        text = (message.get('text') or '').strip()
+        if chat.get('type') != 'private' or not text:
+            return
+        if time.time() - float(message.get('date', time.time())) > self.MAX_AGE:
+            return
+        if not self.paired or chat.get('id') != self.chat_id or sender != self.chat_id:
+            return self._try_pair(chat.get('id'), sender, text)
+        self._command(text)
+
+    def _try_pair(self, chat_id, sender, text):
+        """Strangers get no reply at all; only a correct, unexpired /pair code from the right kind of chat does anything."""
+        pairing = self._pairing
+        found = re.match(r'^/pair(?:@\w+)?\s+(\d{6})$', text)
+        if not pairing or not found or time.time() > pairing['expires'] or pairing['failures'] >= 5:
+            return
+        if not hmac.compare_digest(found.group(1), pairing['code']) or chat_id != sender:
+            pairing['failures'] += 1
+            self.notify(f"Telegram: percobaan pairing salah ({pairing['failures']}/5)." +
+                        (" Terkunci, jalankan /telegram pair untuk kode baru." if pairing['failures'] >= 5 else ''))
+            return
+        self._pairing = None
+        self.config['telegram_chat_id'] = chat_id
+        self.config['telegram_enabled'] = True
+        save_config(self.config)
+        self.send("✅ Terhubung. Kirim pesan biasa untuk menyuruh Lyra bekerja.\n\n" + self._help(), chat=chat_id)
+        self.notify("Telegram terhubung. Pesan dari chat itu kini diteruskan ke Lyra.")
+
+    def _help(self):
+        return ("Perintah:\n/status  ringkasan sesi\n/stop  hentikan pekerjaan yang berjalan\n/help  bantuan ini\n\n"
+                "Pesan biasa dikirim ke Lyra. Setiap penulisan file atau perintah meminta izinmu lewat tombol di sini; "
+                "perintah berbahaya hanya bisa disetujui di terminal.")
+
+    def _command(self, text):
+        word = text.split()[0].lower().split('@')[0] if text.startswith('/') else ''
+        if word in ('/start', '/help'):
+            return self.send(self._help())
+        if word == '/status':
+            return self.send(self.status())
+        if word == '/stop':
+            cancelled = self.live.busy
+            for item in list(self._approvals.values()):
+                item['decision'] = False
+                item['event'].set()
+            if cancelled:
+                self.live.request_cancel()
+            return self.send("⛔ Dihentikan." if cancelled else "Tidak ada pekerjaan yang sedang berjalan.")
+        if word:
+            return self.send("Perintah itu hanya tersedia di terminal. Di sini: /status, /stop, /help. Pesan biasa dikirim ke Lyra.")
+        if text.lower() in ('exit', 'quit'):
+            return self.send("Untuk keluar dari Lyra, ketik langsung di terminal.")
+        if len(text) > 8000:
+            return self.send("Pesan terlalu panjang (maksimal 8.000 karakter).")
+        waiting = self.live.busy or not self.live.inbox.empty()
+        self.live.submit(RemoteText(text))
+        if waiting:
+            self.send("⏳ Lyra masih bekerja; pesanmu masuk antrean.")
+
+    def _handle_callback(self, callback):
+        data = callback.get('data') or ''
+        sender = (callback.get('from') or {}).get('id')
+        chat = ((callback.get('message') or {}).get('chat') or {}).get('id')
+        if not self.paired or sender != self.chat_id or chat != self.chat_id:
+            return
+        found = re.match(r'^(ok|no):([0-9a-f]{12})$', data)
+        entry = self._approvals.get(found.group(2)) if found else None
+        try:
+            self._api('answerCallbackQuery', {'callback_query_id': callback.get('id'),
+                                              'text': 'Diizinkan' if found and found.group(1) == 'ok' and entry else 'Ditolak'})
+        except TelegramError:
+            pass
+        if not entry:
+            return
+        entry['decision'] = found.group(1) == 'ok'
+        entry['event'].set()
+        self._edit(entry, ('✅ Diizinkan' if entry['decision'] else '❌ Ditolak'))
+
+
 # ─── Stream Response Handler ─────────────────────────────────────────────────
 class VisibleResponseFilter:
     """Hide reasoning and tool XML, including tags split across SSE chunks."""
@@ -843,6 +1198,7 @@ def handle_status_command(config, model_idx, cwd, messages, todo_list):
         ("Riwayat", "tersimpan di ~/.amagi_sessions" if history_enabled() else "dimatikan (LYRA_NO_HISTORY)"),
         ("Memori", f"{len(read_memory().strip())} karakter"),
         ("Pengingat", "daemon aktif" if is_daemon_running() else "daemon mati"),
+        ("Telegram", ("terhubung @" + str(config.get("telegram_bot", "bot"))) if (config.get("telegram_enabled") and config.get("telegram_chat_id")) else "tidak aktif"),
         ("Terminal", f"{get_terminal_width()} kolom, {'unicode' if unicode_terminal() else 'ASCII'}, {'warna' if USE_COLOR else 'tanpa warna'}"),
     ]
     width = box_width(78)
@@ -1168,6 +1524,125 @@ def handle_project_command(cwd):
     except (EOFError, KeyboardInterrupt):
         print(f"\n  {DIM}Dibatalkan.{RESET}\n")
 
+def _read_secret(prompt):
+    """Ask for a secret without echoing it, on the real terminal even while the live console is running."""
+    ask = lambda: getpass.getpass(prompt)
+    runner = styling_module.TERMINAL_RUNNER
+    return runner(ask) if runner is not None else ask()
+
+
+TELEGRAM_TOKEN_FORMAT = re.compile(r'^\d{6,12}:[A-Za-z0-9_-]{30,60}$')
+
+
+def telegram_status_lines(config, state):
+    bridge = state.get('bridge')
+    bot = f"@{config['telegram_bot']}" if config.get('telegram_bot') else "bot"
+    if not config.get('telegram_token'):
+        return ["Belum diatur. Jalankan /telegram setup."]
+    if bridge is not None and bridge.paired and bridge.running:
+        return [f"Terhubung ({bot}). Pesan dari chat itu diteruskan ke Lyra selama CLI ini terbuka."]
+    if bridge is not None and bridge._pairing:
+        return [f"Menunggu pairing ({bot}). Kirim kode dari /telegram setup atau /telegram pair ke bot."]
+    if config.get('telegram_chat_id'):
+        return [f"Nonaktif ({bot}). Aktifkan dengan /telegram on."]
+    return [f"Token tersimpan ({bot}) tetapi belum dipasangkan. Jalankan /telegram pair."]
+
+
+def handle_telegram_command(user_input, config, state, live, make_bridge):
+    """/telegram setup | pair | on | off | putus | hapus | status"""
+    parts = user_input.split()
+    sub = parts[1].lower() if len(parts) > 1 else "status"
+    if live is None:
+        print(f"\n  {YELLOW}Telegram butuh konsol live (macOS dan Linux). Windows dan terminal non-interaktif belum didukung.{RESET}\n")
+        return
+    bridge = state.get("bridge")
+
+    def pairing_instructions(bridge):
+        code = bridge.begin_pairing()
+        bot = config.get("telegram_bot")
+        print(f"\n  {BOLD}Pasangkan chat Telegram-mu{RESET}")
+        print(f"  1. Buka {BOLD}t.me/{bot}{RESET}" if bot else "  1. Buka bot-mu di Telegram")
+        print(f"  2. Kirim: {BOLD}/pair {code}{RESET}")
+        print(f"  {COLOR_DIM}Kode berlaku {TelegramBridge.PAIR_TTL // 60} menit dan hanya sekali pakai. Hanya chat pribadi yang dilayani; semua yang lain diabaikan.{RESET}\n")
+
+    if sub == "status":
+        print(f"\n  {BOLD}Telegram{RESET}")
+        for line in telegram_status_lines(config, state):
+            print(f"  {line}")
+        print(f"  {COLOR_DIM}Perintah: /telegram setup · pair · on · off · putus · hapus{RESET}\n")
+    elif sub == "setup":
+        print(f"\n  {BOLD}Hubungkan Lyra ke Telegram{RESET}")
+        print("  1. Di Telegram, buka @BotFather lalu kirim /newbot dan ikuti langkahnya.")
+        print("  2. Salin token yang diberikan (bentuknya 123456789:ABC...).")
+        print(f"  {COLOR_DIM}Token disimpan di {config_file_label()} (hanya bisa dibaca penggunamu) dan tidak pernah ditampilkan.{RESET}\n")
+        try:
+            token = _read_secret("  Tempel token bot ❯ ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(f"\n  {DIM}Dibatalkan.{RESET}\n")
+            return
+        if not TELEGRAM_TOKEN_FORMAT.match(token):
+            print(f"  {RED}Format token tidak dikenali. Salin ulang dari @BotFather.{RESET}\n")
+            return
+        try:
+            info = telegram_call(token, "getMe")
+        except TelegramError as error:
+            print(f"  {RED}Telegram menolak token itu ({error}).{RESET}\n")
+            return
+        if bridge is not None:
+            bridge.stop()
+        config.update({"telegram_token": token, "telegram_bot": (info or {}).get("username", ""), "telegram_enabled": True})
+        config.pop("telegram_chat_id", None)
+        save_config(config)
+        bridge = state["bridge"] = make_bridge()
+        bridge.start()
+        print(f"  {GREEN}✓ Token diterima: @{config['telegram_bot']}{RESET}")
+        pairing_instructions(bridge)
+    elif not config.get("telegram_token"):
+        print(f"\n  {YELLOW}Belum diatur. Jalankan /telegram setup.{RESET}\n")
+    elif sub == "pair":
+        bridge = state["bridge"] = bridge or make_bridge()
+        bridge.start()
+        pairing_instructions(bridge)
+    elif sub == "on":
+        if not config.get("telegram_chat_id"):
+            print(f"\n  {YELLOW}Belum ada chat yang dipasangkan. Jalankan /telegram pair.{RESET}\n")
+            return
+        config["telegram_enabled"] = True
+        save_config(config)
+        bridge = state["bridge"] = bridge or make_bridge()
+        bridge.start()
+        print(f"\n  {GREEN}✓ Telegram aktif.{RESET}\n")
+    elif sub == "off":
+        config["telegram_enabled"] = False
+        save_config(config)
+        if bridge is not None:
+            bridge.stop()
+        print(f"\n  {DIM}Telegram dimatikan. Pesan dari phone tidak lagi diteruskan.{RESET}\n")
+    elif sub == "putus":
+        if bridge is not None:
+            bridge.forget()
+        else:
+            config.pop("telegram_chat_id", None)
+            config["telegram_enabled"] = False
+            save_config(config)
+        print(f"\n  {DIM}Chat dilepas. Token tetap tersimpan; /telegram pair untuk memasangkan lagi.{RESET}\n")
+    elif sub == "hapus":
+        if bridge is not None:
+            bridge.forget(everything=True)
+        for key in ("telegram_token", "telegram_bot", "telegram_chat_id"):
+            config.pop(key, None)
+        config["telegram_enabled"] = False
+        save_config(config)
+        state["bridge"] = None
+        print(f"\n  {DIM}Token dan chat dihapus dari komputer ini. Cabut juga bot-nya lewat @BotFather (/revoke) bila perlu.{RESET}\n")
+    else:
+        print(f"\n  {YELLOW}Pilihan: setup, pair, on, off, putus, hapus, status.{RESET}\n")
+
+
+def config_file_label():
+    return "~/.amagi_cli_config.json"
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 CLI_HELP = """Lyra CLI v{version} - asisten AI AstByte di terminal
 
@@ -1345,8 +1820,23 @@ def main():
     else:
         _run_session(None)
 
+ACTIVE_BRIDGE = [None]
+
+
+def farewell_telegram():
+    """Tell the paired chat that Lyra stopped listening (best effort, never delays leaving)."""
+    bridge = ACTIVE_BRIDGE[0]
+    if bridge is not None and bridge.paired and bridge.running:
+        try:
+            telegram_call(bridge.token, 'sendMessage', {'chat_id': bridge.chat_id, 'text': '🔌 Lyra ditutup. Pesanmu tidak lagi diterima sampai CLI dibuka lagi.'}, timeout=4)
+        except TelegramError:
+            pass
+        bridge.stop()
+
+
 def end_session(live, message):
     """Leave with a clean screen: wipe the conversation, then say goodbye in one line."""
+    farewell_telegram()
     if live is not None:
         live.exit_message = message          # printed by run_live once the live UI has released the terminal
         return
@@ -1422,9 +1912,35 @@ def _run_session(live=None):
 
     activity = ActivityLog()
 
+    # ── Telegram (hanya di konsol live) ───────────────────────────────────────
+    telegram = {"bridge": None}
+    turn_steps = []
+
+    def telegram_notice(text):
+        print(f"\n  {COLOR_DIM}✈ {text}{RESET}")
+
+    def telegram_summary():
+        busy = "sedang bekerja" if (live is not None and live.busy) else "siap"
+        return (f"Lyra v{VERSION} ({busy})\nModel: {MODELS[model_idx]['name']} ({config.get('reasoning_effort', 'medium')})\n"
+                f"Folder: {short_path(active_cwd)}\nPersetujuan: {APPROVAL_LABELS[APPROVAL.mode]} (dari Telegram selalu ditanya)\n"
+                f"Antrean: {live.inbox.qsize() if live is not None else 0} pesan")
+
+    def make_bridge():
+        bridge = TelegramBridge(config, notify=telegram_notice, status=telegram_summary, live=live)
+        ACTIVE_BRIDGE[0] = bridge
+        return bridge
+
+    if live is not None and config.get("telegram_enabled") and config.get("telegram_token") and config.get("telegram_chat_id"):
+        telegram["bridge"] = make_bridge()
+        telegram["bridge"].start()
+        print(f"  {COLOR_DIM}✈ Telegram aktif (@{config.get('telegram_bot', 'bot')}) {ui_symbol('·', '-')} /telegram off untuk mematikan{RESET}")
+
     # ── Loop utama ────────────────────────────────────────────────────────────
     while True:
         try:
+            if telegram["bridge"] is not None:
+                telegram["bridge"].end_turn()          # the previous turn is over once we are back at the top
+            remote = False
             model_info = MODELS[model_idx]
             current_effort = config.get("reasoning_effort", "medium")
 
@@ -1433,7 +1949,11 @@ def _run_session(live=None):
                 editor.notice = f"{ui_symbol('⚡', '!')} v{update_state['latest_version']} tersedia {ui_symbol('·', '/')} /update"
 
             try:
-                user_input = editor.read().strip()
+                raw_input = editor.read()
+                remote = isinstance(raw_input, RemoteText) and telegram["bridge"] is not None
+                user_input = raw_input.strip()
+                if remote:
+                    telegram["bridge"].begin_turn()
             except KeyboardInterrupt:
                 print(f"\n  {COLOR_DIM}Input dibatalkan.{RESET}\n")
                 continue
@@ -1444,7 +1964,7 @@ def _run_session(live=None):
             if not user_input:
                 continue
             if getattr(editor, "session", None) is not None:
-                render_user_band(user_input)
+                render_user_band(("✈ " if remote else "") + user_input)
             if APPROVAL.mode == "all" and not warned_all:
                 warned_all = True
                 render_auto_all_warning()
@@ -1494,6 +2014,10 @@ def _run_session(live=None):
 
             elif user_input.lower() == "/status":
                 info_panel("", handle_status_command, config, model_idx, active_cwd, messages, todo_list)
+                continue
+
+            elif user_input.lower().split()[0] == "/telegram":
+                handle_telegram_command(user_input, config, telegram, live, make_bridge)
                 continue
 
             elif user_input.lower() in ("/todos", "/todo"):
@@ -1617,6 +2141,7 @@ def _run_session(live=None):
                 print(f"\n  {YELLOW}{error}{RESET}\n")
                 continue
             activity.begin_turn()
+            turn_steps.clear()
 
             # ── Kirim ke AI ───────────────────────────────────────────────────
             note_instructions(active_cwd, seen_instructions)
@@ -1645,7 +2170,9 @@ def _run_session(live=None):
 
                 if status_code == 401 and uses_account_login(config):
                     print(f"\n  {RED}[401] Login akun berakhir atau akses perangkat ini dicabut.{RESET}")
-                    if input("  Login ulang? (y/n): ").strip().lower() == 'y':
+                    if remote:
+                        telegram["bridge"].send("⚠️ Login akun berakhir. Masuk ulang lewat /login di terminal.")
+                    if not remote and input("  Login ulang? (y/n): ").strip().lower() == 'y':
                         api_key = login_with_account(config)
                         if api_key:
                             headers["Authorization"] = f"Bearer {api_key}"
@@ -1656,13 +2183,17 @@ def _run_session(live=None):
 
                 elif status_code == 429 and uses_account_login(config):
                     print(f"\n  {YELLOW}{quota_error_message(full_content)}{RESET}\n")
+                    if remote:
+                        telegram["bridge"].send("⚠️ " + quota_error_message(full_content))
                     if messages[-1]["role"] == "user":
                         messages.pop()
                     break
 
                 elif status_code == 401:
                     print(f"\n  {RED}[401] API Key tidak valid atau tidak memiliki akses.{RESET}")
-                    if input("  Reset API Key? (y/n): ").strip().lower() == 'y':
+                    if remote:
+                        telegram["bridge"].send("⚠️ API key tidak valid. Atur ulang lewat /reset-key di terminal.")
+                    if not remote and input("  Reset API Key? (y/n): ").strip().lower() == 'y':
                         reset_api_key(config)
                         api_key = get_api_key(config=config, force_prompt=True)
                         headers["Authorization"] = f"Bearer {api_key}"
@@ -1675,6 +2206,8 @@ def _run_session(live=None):
                 elif status_code != 200:
                     print(f"\n  {RED}[{status_code}] Gagal mendapatkan jawaban.{RESET}")
                     print(f"  {RED}{full_content[:300]}{RESET}\n")
+                    if remote:
+                        telegram["bridge"].send(f"⚠️ Gagal mendapatkan jawaban (kode {status_code}).")
                     if messages[-1]["role"] == "user":
                         messages.pop()
                     break
@@ -1694,6 +2227,7 @@ def _run_session(live=None):
                         break
 
                     LIVE.check_cancel()
+                    turn_steps.append(func_name)
                     activity.start(func_name, args)
 
                     if func_name == "list_directory":
@@ -1765,10 +2299,14 @@ def _run_session(live=None):
                 else:
                     activity.complete_turn()
                     save_session(session_id, messages, active_cwd, session_started)
+                    if remote:
+                        telegram["bridge"].reply(text_before or full_content, turn_steps)
                     break
 
         except KeyboardInterrupt:
             print(f"\n  {COLOR_DIM}Proses dibatalkan. Kamu bisa lanjut mengetik.{RESET}\n")
+            if telegram["bridge"] is not None and telegram["bridge"].remote_turn:
+                telegram["bridge"].send("⛔ Proses dibatalkan.")
             continue
         except EOFError:
             end_session(live, f"\n  {COLOR_DIM}Sampai nanti.{RESET}\n")

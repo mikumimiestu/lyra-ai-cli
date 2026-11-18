@@ -76,11 +76,22 @@ class ApprovalMode:
 APPROVAL = ApprovalMode()
 
 
+# Set while a turn that started on Telegram is running: permission questions go to the phone instead of the terminal,
+# and the approval mode never auto-approves them. (app.TelegramBridge installs and removes this.)
+REMOTE_APPROVER = None
+
+
 def _confirm_permission(action_title, details, kind='command'):
     """Ask before acting, unless the approval mode already covers this kind of action.
 
     kind is "edit" for writing files and folders, "command" for anything that runs a program.
     """
+    approver = REMOTE_APPROVER
+    if approver is not None:
+        try:
+            return bool(approver(action_title, details, kind))
+        except Exception:
+            return False           # when in doubt, a remote request is denied
     try:
         if APPROVAL.allows(kind, details):
             if kind != 'edit':
