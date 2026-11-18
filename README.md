@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.9
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.10
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,16 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.10 — Dokumen Office dan pemeriksaan sintaks
+
+- **Membaca dokumen:** `read_file` dan referensi `@file` kini membaca `.docx`, `.xlsx`, `.pptx`, dan `.pdf` sebagai teks terstruktur: judul dan tabel Word, sel Excel lengkap dengan alamat dan rumus (`B2: =SUM(...)`), slide PowerPoint beserta catatan pembicara, dan teks per halaman PDF. Tanpa pustaka tambahan untuk Office (PDF memakai `pypdf` atau `pdftotext`). File biner lain tidak lagi tampil sebagai sampah.
+- **Mengubah dokumen:** tool `edit_document` untuk Word, Excel, dan PowerPoint. Word: ganti teks (format dipertahankan), sisipkan paragraf di bawah judul atau di akhir sebuah bagian, hapus paragraf, isi sel dan tambah baris atau tabel. Excel: isi sel dan rentang, rumus, tambah baris atau sheet. PowerPoint: ganti teks, ubah judul atau isi, tambah, hapus, pindah, dan gandakan slide, catatan pembicara, isi tabel. Setiap perubahan diterapkan ke salinan dulu, ditampilkan sebagai diff teks, lalu baru menggantikan file asli setelah kamu setuju.
+- **Aman:** file asli dicadangkan ke `~/.amagi_backups` (30 terbaru), `/undo` mengembalikannya, dan hasil yang gagal dibaca ulang tidak pernah menimpa apa pun. Workbook berisi grafik, gambar, atau pivot hanya diubah sebagai salinan (`save_as`) karena menyimpan ulang menghilangkannya. `write_file` dan `edit_file` menolak dokumen supaya tidak merusaknya.
+- **Dokumen baru dan template:** `create_document` membuat `.docx`, `.xlsx`, dan `.pptx` (16:9) dari struktur sederhana. Penanda `{{kunci}}` di template Word, Excel, atau PowerPoint diisi dengan `fill_template`, dan satu template bisa menjadi banyak dokumen (surat, sertifikat, tagihan) dari baris data, maksimal 50 per panggilan tanpa menimpa file.
+- **Paket dipasang saat dibutuhkan:** `python-docx`, `openpyxl`, dan `python-pptx` baru dipasang ke environment Lyra setelah kamu menyetujui perintah pip-nya.
+- **Pemeriksaan sintaks setelah mengubah file kode:** Python, JSON, XML, SVG, CSS, dan HTML diperiksa langsung; PHP, JavaScript, dan shell memakai `php -l`, `node --check`, dan `bash -n` bila terpasang. Hasilnya (valid atau ⚠ beserta barisnya) dilaporkan ke model, sehingga Lyra memperbaiki sendiri sebelum menyatakan selesai.
+- **Untuk yang merilis:** `deploy/publish.sh` kini memakai satu koneksi SSH (password sekali) dan memeriksa bahwa server menyajikan versi yang benar. CI memasang `python-docx`, `openpyxl`, dan `pypdf` agar tes dokumen ikut berjalan.
 
 ### Perbaikan v2.12.9 — Server rilis sendiri dan verifikasi checksum
 

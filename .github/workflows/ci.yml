@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Pasang dependency
-        run: python -m pip install --upgrade pip requests "prompt_toolkit>=3.0.36,<4"
+        run: python -m pip install --upgrade pip requests "prompt_toolkit>=3.0.36,<4" python-docx openpyxl pypdf
       - name: Jalankan tes
         run: python -m unittest discover -s tests -v
         env:

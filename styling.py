@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import re
 
 # ─── Enable ANSI color support on Windows Console ────────────────────────────
@@ -1345,6 +1346,9 @@ def tool_call_parts(name, arguments):
         'read_file': ('Baca', 'filepath'),
         'write_file': ('Tulis', 'filepath'),
         'edit_file': ('Ubah', 'filepath'),
+        'edit_document': ('Ubah dokumen', 'filepath'),
+        'create_document': ('Buat dokumen', 'filepath'),
+        'fill_template': ('Isi template', 'template'),
         'search': ('Cari', 'pattern'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
@@ -1426,6 +1430,371 @@ def workspace_branch(directory):
         return None
 
 
+# ─── Documents: .docx .xlsx .pptx .pdf as readable text ──────────────────────
+# Pure standard library (zipfile + XML) for Office files, so reading works without installing anything.
+# PDF needs pypdf or the pdftotext tool. Nothing here ever writes to a document.
+DOCUMENT_EXTENSIONS = ('.docx', '.xlsx', '.pptx', '.pdf')
+LEGACY_OFFICE_EXTENSIONS = ('.doc', '.xls', '.ppt', '.odt', '.ods', '.odp', '.rtf', '.xlsm', '.docm', '.pptm')
+DOCUMENT_MAX_BYTES = 30 * 1024 * 1024
+DOCUMENT_TEXT_LIMIT = 120_000
+XLSX_MAX_ROWS = 300
+XLSX_MAX_CELLS_PER_ROW = 40
+
+
+class DocumentError(Exception):
+    """A document that cannot be read (corrupt, too large, unsupported); the message is meant for the user."""
+
+
+_W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+_P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+_S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+_REL = 'http://schemas.openxmlformats.org/package/2006/relationships'
+
+
+def _tag(namespace, name):
+    return '{%s}%s' % (namespace, name)
+
+
+def _zip_member(archive, name):
+    """Parsed XML of one archive member, with limits against zip bombs and entity tricks."""
+    import xml.etree.ElementTree as ET
+    try:
+        info = archive.getinfo(name)
+    except KeyError:
+        return None
+    if info.file_size > 50 * 1024 * 1024:
+        raise DocumentError(f'Bagian {name} terlalu besar untuk dibaca.')
+    data = archive.read(name)
+    if b'<!ENTITY' in data or b'<!DOCTYPE' in data[:2000] and b'[' in data[:2000]:
+        raise DocumentError('Dokumen berisi deklarasi XML yang tidak aman, tidak dibaca.')
+    try:
+        return ET.fromstring(data)
+    except ET.ParseError as error:
+        raise DocumentError(f'Isi {name} rusak: {error}') from error
+
+
+def _open_package(path, kind):
+    import zipfile
+    try:
+        archive = zipfile.ZipFile(path)
+    except zipfile.BadZipFile as error:
+        raise DocumentError(f'File ini bukan {kind} yang valid (arsip rusak atau dilindungi password).') from error
+    total = sum(info.file_size for info in archive.infolist())
+    if total > 300 * 1024 * 1024:
+        raise DocumentError('Ukuran isi dokumen setelah dibuka terlalu besar (kemungkinan arsip berbahaya).')
+    return archive
+
+
+def _relationships(archive, part):
+    """{rel id: (target path inside the package, type)} for a part such as 'xl/workbook.xml'."""
+    folder, _, name = part.rpartition('/')
+    root = _zip_member(archive, f'{folder}/_rels/{name}.rels' if folder else f'_rels/{name}.rels')
+    found = {}
+    if root is None:
+        return found
+    for rel in root.findall(_tag(_REL, 'Relationship')):
+        target = rel.get('Target', '')
+        if target.startswith('/'):
+            path = target.lstrip('/')
+        else:
+            import posixpath
+            path = posixpath.normpath(posixpath.join(folder, target))
+        found[rel.get('Id')] = (path, rel.get('Type', ''))
+    return found
+
+
+def _docx_text(archive):
+    root = _zip_member(archive, 'word/document.xml')
+    if root is None:
+        raise DocumentError('File ini bukan dokumen Word (word/document.xml tidak ada).')
+    body = root.find(_tag(_W, 'body'))
+
+    def runs(node):
+        out = []
+        for element in node.iter():
+            if element.tag == _tag(_W, 't') and element.text:
+                out.append(element.text)
+            elif element.tag == _tag(_W, 'tab'):
+                out.append('\t')
+            elif element.tag in (_tag(_W, 'br'), _tag(_W, 'cr')):
+                out.append('\n')
+            elif element.tag == _tag(_W, 'noBreakHyphen'):
+                out.append('-')
+        return ''.join(out)
+
+    def paragraph(node):
+        text = runs(node).strip('\n')
+        properties = node.find(_tag(_W, 'pPr'))
+        style = ''
+        numbered = None
+        if properties is not None:
+            style_node = properties.find(_tag(_W, 'pStyle'))
+            style = (style_node.get(_tag(_W, 'val')) or '') if style_node is not None else ''
+            numbered = properties.find(_tag(_W, 'numPr'))
+        heading = re.match(r'(?i)^(?:heading|judul)\s*(\d)', style)
+        if heading and text.strip():
+            return '#' * min(6, int(heading.group(1))) + ' ' + text.strip()
+        if style.lower() in ('title', 'judul') and text.strip():
+            return '# ' + text.strip()
+        if numbered is None and re.match(r'(?i)^(?:list|daftar)', style) and 'para' not in style.lower():
+            numbered = properties.find(_tag(_W, 'pStyle'))        # bullet or number style: no numPr on the paragraph itself
+        if numbered is not None and text.strip():
+            level = numbered.find(_tag(_W, 'ilvl'))
+            depth = int(level.get(_tag(_W, 'val'), '0')) if level is not None and level.get(_tag(_W, 'val'), '0').isdigit() else 0
+            depth = min(depth, 6)
+            return '  ' * depth + '- ' + text.strip()
+        return text
+
+    stats = {'paragraf': 0, 'tabel': 0}
+
+    def table(node):
+        rows = []
+        for row in node.findall(_tag(_W, 'tr')):
+            cells = []
+            for cell in row.findall(_tag(_W, 'tc')):
+                cells.append(' '.join(part for part in (runs(p).strip() for p in cell.iter(_tag(_W, 'p'))) if part))
+            rows.append('| ' + ' | '.join(cells) + ' |')
+        stats['tabel'] += 1
+        return '\n'.join(rows)
+
+    def blocks(container):
+        for child in container:
+            if child.tag == _tag(_W, 'p'):
+                text = paragraph(child)
+                if text.strip():
+                    stats['paragraf'] += 1
+                yield text
+            elif child.tag == _tag(_W, 'tbl'):
+                yield table(child)
+            elif child.tag == _tag(_W, 'sdt'):
+                content = child.find(_tag(_W, 'sdtContent'))
+                if content is not None:
+                    yield from blocks(content)
+
+    parts = [text for text in blocks(body) if text is not None]
+    output = re.sub(r'\n{3,}', '\n\n', '\n'.join(parts)).strip()
+    extras = []
+    for name in sorted(archive.namelist(), key=lambda n: (0 if 'header' in n else 1, n)):
+        if re.match(r'word/(header|footer)\d*\.xml$', name):
+            node = _zip_member(archive, name)
+            text = ' '.join(part for part in (runs(p).strip() for p in node.iter(_tag(_W, 'p'))) if part)
+            if text:
+                extras.append(f"{'Header' if 'header' in name else 'Footer'}: {text}")
+    if extras:
+        output += '\n\n' + '\n'.join(extras)
+    return output, f"Dokumen Word: {stats['paragraf']} paragraf, {stats['tabel']} tabel"
+
+
+def _column_index(reference):
+    letters = re.match(r'[A-Z]+', reference or '')
+    index = 0
+    for char in (letters.group(0) if letters else ''):
+        index = index * 26 + ord(char) - 64
+    return index
+
+
+def _xlsx_text(archive):
+    workbook = _zip_member(archive, 'xl/workbook.xml')
+    if workbook is None:
+        raise DocumentError('File ini bukan Excel (xl/workbook.xml tidak ada).')
+    shared = []
+    strings = _zip_member(archive, 'xl/sharedStrings.xml')
+    if strings is not None:
+        for item in strings.findall(_tag(_S, 'si')):
+            pieces = []
+            for child in item:
+                if child.tag == _tag(_S, 't'):
+                    pieces.append(child.text or '')
+                elif child.tag == _tag(_S, 'r'):
+                    pieces.extend(t.text or '' for t in child.findall(_tag(_S, 't')))
+            shared.append(''.join(pieces))
+    rels = _relationships(archive, 'xl/workbook.xml')
+    sheets = workbook.find(_tag(_S, 'sheets'))
+    out, cell_total = [], 0
+    for sheet in (sheets if sheets is not None else []):
+        name = sheet.get('name', '?')
+        target = rels.get(sheet.get(_tag(_R, 'id')), (None,))[0]
+        root = _zip_member(archive, target) if target else None
+        hidden = ' (tersembunyi)' if sheet.get('state') in ('hidden', 'veryHidden') else ''
+        if root is None:
+            out.append(f'## Sheet: {name}{hidden}\n(kosong atau tidak terbaca)')
+            continue
+        dimension = root.find(_tag(_S, 'dimension'))
+        title = f"## Sheet: {name}{hidden}" + (f" ({dimension.get('ref')})" if dimension is not None else '')
+        lines, shown, total_rows = [title], 0, 0
+        for row in root.iter(_tag(_S, 'row')):
+            cells = []
+            for cell in row.findall(_tag(_S, 'c')):
+                kind = cell.get('t')
+                formula = cell.find(_tag(_S, 'f'))
+                value = cell.find(_tag(_S, 'v'))
+                if kind == 'inlineStr':
+                    inline = cell.find(_tag(_S, 'is'))
+                    text = ''.join(t.text or '' for t in inline.iter(_tag(_S, 't'))) if inline is not None else ''
+                elif value is None or value.text is None:
+                    text = ''
+                elif kind == 's':
+                    index = int(value.text) if value.text.isdigit() else -1
+                    text = shared[index] if 0 <= index < len(shared) else ''
+                elif kind == 'b':
+                    text = 'TRUE' if value.text == '1' else 'FALSE'
+                else:
+                    text = value.text
+                formula_text = (formula.text or '').strip() if formula is not None else ''
+                if formula is not None and formula_text:
+                    text = f'={formula_text} → {text}' if text != '' else f'={formula_text}'
+                if text == '':
+                    continue
+                cells.append(f"{cell.get('r', '?')}: {text.replace(chr(10), ' ')}")
+            if not cells:
+                continue
+            total_rows += 1
+            if shown >= XLSX_MAX_ROWS:
+                continue
+            shown += 1
+            extra = len(cells) - XLSX_MAX_CELLS_PER_ROW
+            line = ' | '.join(cells[:XLSX_MAX_CELLS_PER_ROW]) + (f' | … +{extra} sel' if extra > 0 else '')
+            lines.append(line)
+            cell_total += len(cells)
+        if total_rows > shown:
+            lines.append(f'… +{total_rows - shown} baris lagi')
+        if total_rows == 0:
+            lines.append('(tidak ada isi)')
+        out.append('\n'.join(lines))
+    return '\n\n'.join(out), f'Excel: {len(out)} sheet, {cell_total} sel berisi'
+
+
+def _pptx_text(archive):
+    presentation = _zip_member(archive, 'ppt/presentation.xml')
+    if presentation is None:
+        raise DocumentError('File ini bukan PowerPoint (ppt/presentation.xml tidak ada).')
+    rels = _relationships(archive, 'ppt/presentation.xml')
+    order = presentation.find(_tag(_P, 'sldIdLst'))
+    slides = []
+    for item in (order if order is not None else []):
+        target = rels.get(item.get(_tag(_R, 'id')), (None,))[0]
+        if target:
+            slides.append(target)
+    if not slides:
+        slides = sorted((n for n in archive.namelist() if re.match(r'ppt/slides/slide\d+\.xml$', n)),
+                        key=lambda n: int(re.search(r'(\d+)\.xml$', n).group(1)))
+
+    def paragraphs(node):
+        lines = []
+        for para in node.iter(_tag(_A, 'p')):
+            text = ''.join('\n' if e.tag == _tag(_A, 'br') else (e.text or '')
+                           for e in para.iter() if e.tag in (_tag(_A, 't'), _tag(_A, 'br')))
+            if text.strip():
+                properties = para.find(_tag(_A, 'pPr'))
+                level = int(properties.get('lvl', '0')) if properties is not None and (properties.get('lvl') or '0').isdigit() else 0
+                lines.append('  ' * level + text.strip())
+        return lines
+
+    def placeholder(shape):
+        found = shape.find(f"{_tag(_P, 'nvSpPr')}/{_tag(_P, 'nvPr')}/{_tag(_P, 'ph')}")
+        return found.get('type') if found is not None else None
+
+    out = []
+    for number, part in enumerate(slides, 1):
+        root = _zip_member(archive, part)
+        if root is None:
+            continue
+        title, body, tables = '', [], []
+        for shape in root.iter():
+            if shape.tag == _tag(_P, 'sp'):
+                lines = paragraphs(shape)
+                if placeholder(shape) in ('title', 'ctrTitle') and not title:
+                    title = ' '.join(lines)
+                else:
+                    body.extend(lines)
+            elif shape.tag == _tag(_A, 'tbl'):
+                rows = []
+                for row in shape.findall(_tag(_A, 'tr')):
+                    cells = [' '.join(paragraphs(cell)) for cell in row.findall(_tag(_A, 'tc'))]
+                    rows.append('| ' + ' | '.join(cells) + ' |')
+                tables.append('\n'.join(rows))
+        notes = []
+        for _id, (target, kind) in _relationships(archive, part).items():
+            if kind.endswith('/notesSlide'):
+                notes_root = _zip_member(archive, target)
+                if notes_root is not None:
+                    for shape in notes_root.iter(_tag(_P, 'sp')):
+                        if placeholder(shape) == 'body':
+                            notes.extend(paragraphs(shape))
+        block = [f'## Slide {number}' + (f': {title}' if title else '')] + body + tables
+        if notes:
+            block.append('Catatan: ' + ' '.join(notes))
+        out.append('\n'.join(block))
+    return '\n\n'.join(out), f'PowerPoint: {len(out)} slide'
+
+
+def _pdf_text(path):
+    import importlib.util
+    pages = []
+    if importlib.util.find_spec('pypdf') is not None:
+        import pypdf
+        try:
+            reader = pypdf.PdfReader(path)
+            if reader.is_encrypted:
+                raise DocumentError('PDF ini dilindungi password.')
+            for number, page in enumerate(reader.pages[:150], 1):
+                pages.append(f'## Halaman {number}\n' + (page.extract_text() or '').strip())
+            count = len(reader.pages)
+        except DocumentError:
+            raise
+        except Exception as error:
+            raise DocumentError(f'PDF tidak bisa dibaca: {error}') from error
+    elif shutil.which('pdftotext'):
+        import subprocess
+        try:
+            done = subprocess.run(['pdftotext', '-layout', '-l', '150', path, '-'], capture_output=True, text=True,
+                                  timeout=60, errors='replace')
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise DocumentError(f'pdftotext gagal: {error}') from error
+        if done.returncode != 0:
+            raise DocumentError('PDF tidak bisa dibaca: ' + (done.stderr.strip().splitlines() or ['pdftotext gagal'])[-1])
+        for number, chunk in enumerate(done.stdout.split('\f'), 1):
+            if chunk.strip():
+                pages.append(f'## Halaman {number}\n' + chunk.strip())
+        count = len(pages)
+    else:
+        raise DocumentError('Membaca PDF butuh paket pypdf (python -m pip install pypdf) atau alat pdftotext (poppler).')
+    text = '\n\n'.join(pages)
+    if not re.sub(r'## Halaman \d+', '', text).strip():
+        raise DocumentError('PDF ini tidak berisi teks yang bisa dibaca (kemungkinan hasil pindai berupa gambar).')
+    return text, f'PDF: {count} halaman'
+
+
+def extract_document_text(path, limit=DOCUMENT_TEXT_LIMIT):
+    """(text, summary) of a .docx, .xlsx, .pptx or .pdf. Raises DocumentError with a user-facing reason."""
+    extension = os.path.splitext(path)[1].lower()
+    if extension in LEGACY_OFFICE_EXTENSIONS:
+        suggestion = {'.doc': '.docx', '.xls': '.xlsx', '.ppt': '.pptx'}.get(extension, 'format baru (.docx/.xlsx/.pptx)')
+        raise DocumentError(f'Format {extension} (versi lama) belum didukung. Simpan ulang sebagai {suggestion}.')
+    if extension not in DOCUMENT_EXTENSIONS:
+        raise DocumentError(f'Jenis dokumen {extension or "tanpa ekstensi"} tidak dikenal.')
+    try:
+        size = os.path.getsize(path)
+    except OSError as error:
+        raise DocumentError(f'Tidak bisa membaca file: {error.strerror}') from error
+    if size > DOCUMENT_MAX_BYTES:
+        raise DocumentError(f'Dokumen terlalu besar ({size // (1024 * 1024)} MB). Maksimal {DOCUMENT_MAX_BYTES // (1024 * 1024)} MB.')
+    if extension == '.pdf':
+        text, summary = _pdf_text(path)
+    else:
+        archive = _open_package(path, {'.docx': 'dokumen Word', '.xlsx': 'file Excel', '.pptx': 'file PowerPoint'}[extension])
+        with archive:
+            reader = {'.docx': _docx_text, '.xlsx': _xlsx_text, '.pptx': _pptx_text}[extension]
+            text, summary = reader(archive)
+    if len(text) > limit:
+        text = text[:limit] + f'\n… (dipotong, {len(text) - limit:,} karakter lagi tidak ditampilkan)'
+    if not text.strip():
+        text = '(dokumen ini tidak berisi teks)'
+    return text, summary
+
+
 REFERENCE_PATTERN = re.compile(r'(?<!\S)@(?:"([^"\n]+)"|\'([^\'\n]+)\'|([^\s]+))')
 
 
@@ -1442,6 +1811,18 @@ def prepare_user_message(text, directory):
             continue
         if len(seen) >= 8:
             raise ValueError('Maksimal 8 referensi file per pesan.')
+        if os.path.splitext(filename)[1].lower() in DOCUMENT_EXTENSIONS + LEGACY_OFFICE_EXTENSIONS:
+            try:
+                content, summary = extract_document_text(filename, limit=128 * 1024)
+            except DocumentError as error:
+                raise ValueError(f'@{reference}: {error}') from error
+            size = len(content.encode('utf-8'))
+            if total + size > 256 * 1024:
+                raise ValueError('Referensi terlalu besar: maksimal 128 KB per file dan 256 KB per pesan.')
+            attachments.append(f'\n[Referensi dokumen: {reference} — {summary}]\n{content}\n[Akhir referensi dokumen]')
+            total += size
+            seen.add(real)
+            continue
         try:
             with open(filename, 'rb') as handle:
                 data = handle.read(128 * 1024 + 1)
@@ -1498,7 +1879,7 @@ if EDITOR_AVAILABLE:
 def activity_group(name, arguments):
     if name in ('list_directory', 'read_file', 'search'):
         return 'Eksplorasi'
-    if name in ('write_file', 'edit_file', 'create_directory', 'init_project'):
+    if name in ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template', 'create_directory', 'init_project'):
         return 'Perubahan'
     if name == 'execute_command':
         command = str(arguments.get('command', ''))

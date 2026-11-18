@@ -35,7 +35,7 @@ from tools import (
     create_directory, init_project, DEFAULT_TIMEOUT,
     get_system_time, tool_save_memory, tool_read_memory, tool_clear_memory,
     tool_set_reminder, tool_list_reminders, tool_cancel_reminder, TodoList,
-    APPROVAL, APPROVAL_LABELS, edit_file, search, UNDO, undo_last, describe_undo_stack
+    APPROVAL, APPROVAL_LABELS, edit_file, search, UNDO, undo_last, describe_undo_stack, edit_document, create_document, fill_template
 )
 from config import (
     get_api_key, reset_api_key, save_config, load_config,
@@ -143,6 +143,14 @@ Daftar tool yang tersedia:
 - read_file        : Membaca teks file.     Args: {{"filepath": "path/ke/file"}}
 - write_file       : Membuat file baru atau menulis ulang seluruh isi file. Args: {{"filepath": "path", "content": "isi file"}}
 - edit_file        : Mengubah SEBAGIAN file yang sudah ada dengan mengganti teks persis. Args: {{"filepath": "path", "old": "teks lama persis", "new": "teks baru", "replace_all": false}}
+- edit_document   : Mengubah dokumen Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx) lewat daftar operasi; preview dan izin dulu, file asli dicadangkan.
+                     Args: {{"filepath": "laporan.docx", "operations": [...], "save_as": "salinan.docx (opsional)"}}
+                     Word: {{"op":"replace_text","find":"lama","replace":"baru","all":true}} | {{"op":"insert_paragraph","where":"after|before|end_of_section|start|end","anchor":"teks judul/paragraf","text":"isi atau [daftar isi]","style":"Heading 2|List Bullet|Normal"}} | {{"op":"delete_paragraph","match":"teks"}} | {{"op":"set_cell","table":1,"row":2,"col":3,"text":"isi"}} | {{"op":"add_table_row","table":1,"values":["a","b"]}} | {{"op":"add_table","where":"after","anchor":"teks","rows":[["H1","H2"],["a","b"]]}}
+                     Excel: {{"op":"set_cell","sheet":"Sheet1","cell":"B2","value":15000}} (rumus: "=SUM(B2:B9)") | {{"op":"set_range","sheet":"Sheet1","start":"A10","values":[["a",1],["b",2]]}} | {{"op":"append_row","sheet":"Sheet1","values":["x",5]}} | {{"op":"add_sheet","name":"Ringkasan"}}
+                     PowerPoint (slide mulai dari 1): {{"op":"replace_text","find":"lama","replace":"baru"}} | {{"op":"set_text","slide":2,"shape":"title|body","match":"potongan teks","text":"isi baru"}} | {{"op":"add_slide","layout":"title_content|title|section|blank","title":"Judul","body":["poin 1",{{"text":"sub","level":1}}],"notes":"catatan","position":3}} | {{"op":"delete_slide","slide":4}} | {{"op":"move_slide","slide":4,"to":2}} | {{"op":"duplicate_slide","slide":2}} | {{"op":"set_notes","slide":2,"text":"..."}} | {{"op":"set_cell","slide":3,"table":1,"row":2,"col":2,"text":"x"}}
+                     Template (Word/Excel/PowerPoint dengan penanda {{{{kunci}}}}): {{"op":"fill_template","values":{{"nama":"Budi","tanggal":"1 Januari"}}}}
+- create_document : Membuat dokumen baru, tidak menimpa file yang ada. .docx: {{"filepath":"baru.docx","blocks":[{{"type":"title|heading|paragraph|bullets|numbered|table","text":"...","level":1,"items":[],"rows":[[]]}}]}}; .xlsx: {{"filepath":"data.xlsx","sheets":[{{"name":"Data","rows":[["Nama","Qty"],["Kopi",3]]}}]}}; .pptx: {{"filepath":"paparan.pptx","slides":[{{"layout":"title","title":"Judul","body":"Subjudul"}},{{"title":"Agenda","body":["Satu","Dua"],"notes":"catatan"}}]}}
+- fill_template   : Buat BANYAK dokumen dari satu template ber-penanda {{{{kunci}}}} (Word/Excel/PowerPoint), satu per baris data. Args: {{"template":"surat.docx","rows":[{{"nama":"Budi","kelas":"A"}},{{"nama":"Sari","kelas":"B"}}],"output":"surat-{{nama}}.docx"}} (maks 50, tidak menimpa file)
 - search           : Cari teks (regex) di banyak file atau daftar file lewat glob. Args: {{"pattern": "regex", "path": ".", "glob": "*.py", "ignore_case": false, "max_results": 100}}
 - create_directory : Membuat folder baru.   Args: {{"dirpath": "path/ke/folder"}}
 - execute_command  : Jalankan terminal.     Args: {{"command": "perintah", "cwd": "/optional/path", "timeout": 600}}
@@ -166,6 +174,8 @@ Panduan fitur khusus:
 4. Daftar tugas: Untuk pekerjaan dengan 3 langkah atau lebih, mulai dengan `update_todos`, jaga tepat satu item berstatus in_progress, dan perbarui daftar setiap satu langkah selesai. Jangan pakai untuk permintaan sederhana.
 5. Mengubah file: untuk file yang sudah ada, baca dulu dengan `read_file`, lalu pakai `edit_file` dengan potongan `old` yang unik dan persis (termasuk spasi). Pakai `write_file` hanya untuk file baru atau penulisan ulang total. Pakai `search` untuk menemukan kode sebelum membaca banyak file.
 6. Jangan sebutkan format XML/tool ini secara mentah kepada pengguna.
+7. Dokumen: `read_file` dan referensi @file membaca .docx, .xlsx, .pptx, dan .pdf sebagai teks terstruktur (judul, tabel, sel dengan alamat seperti B2, slide bernomor). Ubah Word, Excel, dan PowerPoint HANYA dengan `edit_document` (buat baru dengan `create_document`, banyak dokumen dari satu template dengan `fill_template`), tidak pernah dengan write_file atau edit_file (akan ditolak). Selalu `read_file` dokumennya dulu agar anchor, nomor slide, dan alamat sel persis; tunjuk bagian dengan teks judul atau paragraf yang ada. Kirim angka Excel sebagai angka, bukan teks. PDF dan format lama (.doc/.xls/.ppt) belum bisa diubah: jelaskan perubahannya atau tulis ke file teks bila pengguna mau. Workbook berisi grafik/gambar/pivot hanya boleh diubah lewat `save_as` (salinan baru), karena menyimpan ulang menghilangkan bagian itu. Slide berisi gambar atau grafik tidak bisa digandakan.
+8. Setelah write_file atau edit_file pada file kode, hasil tool memuat pemeriksaan sintaks. Bila ada tanda ⚠, perbaiki dengan edit_file saat itu juga. Untuk perubahan non-sepele, jalankan tes atau build yang ada di project (misalnya pytest, npm test) lewat execute_command sebelum menyatakan selesai, dan laporkan hasilnya apa adanya.
 """
 
 def get_current_system_prompt():
@@ -1699,6 +1709,12 @@ def _run_session(live=None):
                     elif func_name == "edit_file":
                         result = edit_file(args.get("filepath"), args.get("old", ""), args.get("new", ""),
                                            bool(args.get("replace_all", False)))
+                    elif func_name == "edit_document":
+                        result = edit_document(args.get("filepath"), args.get("operations"), args.get("save_as"))
+                    elif func_name == "create_document":
+                        result = create_document(args.get("filepath"), args.get("blocks"), args.get("sheets"), args.get("slides"))
+                    elif func_name == "fill_template":
+                        result = fill_template(args.get("template"), args.get("rows"), args.get("output"))
                     elif func_name == "search":
                         result = search(args.get("pattern", ""), args.get("path", "."), args.get("glob"),
                                         bool(args.get("ignore_case", False)), args.get("max_results", 100))

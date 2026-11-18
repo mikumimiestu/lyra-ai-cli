@@ -28,9 +28,18 @@ echo "Rilis $FILE_VERSION disiapkan:"; cat "$STAGE/SHA256SUMS"
 
 if [ "${DRY_RUN:-0}" = "1" ]; then echo "DRY_RUN: tidak ada yang diunggah."; exit 0; fi
 
-SSH=(ssh -p "$PORT")
-RSYNC=(rsync -az -e "ssh -p $PORT")
+# Satu koneksi SSH dipakai ulang untuk kedua tahap, jadi password hanya diminta sekali.
+SSH_OPTS="ssh -p $PORT -o ControlMaster=auto -o ControlPath=/tmp/amagi-publish-%C -o ControlPersist=60"
+RSYNC=(rsync -az -e "$SSH_OPTS")
 # Dua tahap: file dulu, lalu version.txt dan SHA256SUMS, agar klien tidak melihat versi baru sebelum filenya lengkap.
 "${RSYNC[@]}" "${FILES[@]/#/$STAGE/}" "$VPS:$WEBROOT/"
 "${RSYNC[@]}" "$STAGE/SHA256SUMS" "$STAGE/version.txt" "$VPS:$WEBROOT/"
-echo "Selesai. Cek: curl -s https://astbyte.my.id/version.txt"
+$SSH_OPTS -O exit "$VPS" 2>/dev/null || true
+echo "Terunggah. Memeriksa server..."
+LIVE="$(curl -fsS --max-time 15 https://astbyte.my.id/version.txt || true)"
+if [ "$LIVE" = "$FILE_VERSION" ]; then
+    echo "Selesai: https://astbyte.my.id menyajikan versi $LIVE"
+else
+    echo "PERINGATAN: server menjawab versi '${LIVE:-tidak ada}', seharusnya $FILE_VERSION. Jalankan ulang skrip ini." >&2
+    exit 1
+fi
