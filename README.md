@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.12
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.13
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,13 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.13 — File lewat Telegram dan membaca halaman web
+
+- **File dari phone ke Lyra:** kirim dokumen (teks, CSV, Word, Excel, PowerPoint, PDF, dan lainnya) ke bot Telegram-mu dan Lyra langsung membaca isinya. Keterangan (caption) menjadi instruksi, misalnya "hitung total kolom B"; tanpa keterangan Lyra meringkas. File disimpan di `~/.amagi_inbox` (hanya bisa dibaca penggunamu, 100 terbaru), maksimal 20 MB, dengan nama yang dibersihkan. Foto ikut tersimpan, tetapi Lyra belum bisa melihat isi gambar, dan keterangan foto tidak pernah dianggap perintah.
+- **File dari Lyra ke phone:** tool `send_file`, misalnya "buatkan laporan, kirim ke HP". Setiap pengiriman **selalu minta izin**, bahkan di mode AUTO SEMUA, dan dari Telegram lewat tombol Izinkan/Tolak. File berisi rahasia ditolak sebelum bertanya: kunci SSH, `.env`, `.pem`, kredensial cloud, serta konfigurasi, memori, dan sesi Lyra sendiri (juga lewat symlink). Gambar dikirim sebagai foto, lainnya sebagai dokumen, maksimal 50 MB. File yang dikirim ke Telegram melewati server Telegram.
+- **`fetch_url`, membaca halaman web:** Lyra bisa membuka halaman publik dan membacanya sebagai teks (judul, daftar, tabel, blok kode, tautan). Hanya baca, dan tidak tersedia di mode `-p`. Pertama kali ke tiap situs kamu ditanya izin. Pengaman: hanya `http`/`https` ke port 80 dan 443, alamat lokal dan jaringan pribadi (localhost, LAN, metadata cloud) diblokir, setiap pengalihan diperiksa ulang, ada batas ukuran (2 MB) dan waktu (15 detik), dan isi halaman ditandai tidak tepercaya sehingga instruksi di dalamnya tidak diikuti.
+- **Variabel lingkungan baru:** `LYRA_INBOX_DIR` (folder file masuk), `LYRA_ALLOW_PRIVATE_URLS=1` (khusus pengujian; membuka batas alamat lokal untuk `fetch_url`).
 
 ### Baru di v2.12.12 — Gateway tanpa layar dan lebih banyak perintah Telegram
 

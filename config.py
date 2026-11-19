@@ -216,7 +216,7 @@ def reset_api_key(config: dict = None):
     print(f"  {GREEN}✓ Kredensial berhasil dihapus.{RESET}\n")
 
 # ─── Version & Auto-Update ───────────────────────────────────────────────────
-VERSION = "2.12.12"
+VERSION = "2.12.13"
 GITHUB_REPO = "mikumimiestu/lyra-ai-cli"
 # Where releases come from, in order. The first source publishes SHA256SUMS next to the files, and /update
 # refuses files that do not match it. GitHub is the fallback (no checksum file, HTTPS only). Older installs only

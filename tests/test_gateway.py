@@ -227,7 +227,7 @@ class GatewayProcessTests(GatewayDirCase):
                 if stream:
                     stream.close()
 
-    def start(self, paired=True, extra=None, wait=True):
+    def start(self, paired=True, extra=None, wait=True, env=None):
         config = {'api_key': 'test', 'model_index': 2, 'reasoning_effort': 'medium'}
         if paired:
             config.update({'telegram_token': FakeTelegram.TOKEN, 'telegram_bot': FakeTelegram.BOT,
@@ -235,7 +235,8 @@ class GatewayProcessTests(GatewayDirCase):
         script = os.path.join(self.dir, f'launch{len(self.processes)}.py')
         Path(script).write_text(LAUNCHER.format(root=ROOT, url=self.api.url, config=config, extra=extra or []))
         env = dict(os.environ, LYRA_TELEGRAM_API=self.fake.url, LYRA_GATEWAY_DIR=self.dir,
-                   LYRA_SESSIONS_DIR=os.path.join(self.dir, 'sessions'), PYTHONIOENCODING='utf-8')
+                   LYRA_SESSIONS_DIR=os.path.join(self.dir, 'sessions'), LYRA_INBOX_DIR=os.path.join(self.dir, 'masuk'),
+                   PYTHONIOENCODING='utf-8', **(env or {}))
         process = subprocess.Popen([sys.executable, script], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE, text=True, env=env, cwd=self.work)
         self.processes.append(process)
@@ -356,6 +357,79 @@ class GatewayProcessTests(GatewayDirCase):
         self.write_lock(999999, age=app.GATEWAY_STALE + 10)
         process = self.start()
         self.assertEqual(app.gateway_state()['pid'], process.pid)
+
+    def tool_call(self, name, **arguments):
+        return '<tool_call>' + json.dumps({'name': name, 'arguments': arguments}) + '</tool_call>'
+
+    def test_a_file_from_the_phone_is_read_by_lyra(self):
+        self.start()
+        self.fake.send_document('catatan.txt', 'Rapat: anggaran naik 15 persen.\n'.encode(), caption='ringkas ini')
+        self.assertTrue(self.fake.wait_for(lambda: self.api.requests, 12), self.log()[-500:])
+        sent_to_model = self.api.requests[-1]['messages'][-1]['content']
+        self.assertIn('ringkas ini', sent_to_model)
+        self.assertIn('Rapat: anggaran naik 15 persen.', sent_to_model)             # the file's text reached the model
+        self.assertTrue(self.fake.wait_for(lambda: any('Halo! Ini' in t for t in self.fake.sent(555)), 12))
+        self.assertEqual(len(os.listdir(os.path.join(self.dir, 'masuk'))), 1)
+
+    def test_lyra_sends_a_file_to_the_phone_only_after_the_tap(self):
+        Path(self.work, 'hasil.txt').write_text('hasil akhir\n')
+        call = self.tool_call('send_file', filepath='hasil.txt', caption='Ini hasilnya')
+        self.api.custom.append((lambda last: 'kirim berkas' in last, [('Saya kirim.\n', 0.02), (call, 0.02)]))
+        self.start()
+        self.fake.say('tolong kirim berkas hasil ke hp')
+        self.assertTrue(self.fake.wait_for(lambda: self.fake.keyboards(), 12), self.log()[-500:])
+        self.assertIn('Kirim File', [t for t in self.fake.sent(555) if 'Izin diperlukan' in t][0])
+        self.assertEqual(self.fake.uploads, [])
+        self.fake.press(self.fake.keyboards()[0][0]['callback_data'])
+        self.assertTrue(self.fake.wait_for(lambda: self.fake.uploads, 12), self.log()[-500:])
+        upload = self.fake.uploads[0]
+        self.assertEqual((upload['filename'], upload['content'], upload['fields']['caption']), ('hasil.txt', b'hasil akhir\n', 'Ini hasilnya'))
+        self.assertTrue(self.fake.wait_for(lambda: any('Selesai membaca' in t for t in self.fake.sent(555)), 12))
+
+    def test_a_secret_file_is_refused_without_even_asking_the_phone(self):
+        Path(self.work, '.env').write_text('TOKEN=rahasia\n')
+        call = self.tool_call('send_file', filepath='.env')
+        self.api.custom.append((lambda last: 'kirim rahasia' in last, [('Saya kirim.\n', 0.02), (call, 0.02)]))
+        self.start()
+        self.fake.say('kirim rahasia ke hp')
+        self.assertTrue(self.fake.wait_for(lambda: any('Selesai membaca' in t for t in self.fake.sent(555)), 12), self.log()[-500:])
+        self.assertEqual(self.fake.keyboards(), [])
+        self.assertEqual(self.fake.uploads, [])
+        self.assertTrue(any('tidak boleh dikirim' in r['messages'][-1]['content'] for r in self.api.requests))
+
+    def test_lyra_reads_a_web_page_after_the_phone_allows_the_site(self):
+        from test_fetch_url import Handler
+        from http.server import ThreadingHTTPServer
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        Handler.hits.clear()                                  # the handler's log is shared with the fetch_url tests
+        url = f'http://127.0.0.1:{server.server_address[1]}/page'
+        call = self.tool_call('fetch_url', url=url)
+        self.api.custom.append((lambda last: 'buka halaman' in last, [('Saya buka.\n', 0.02), (call, 0.02)]))
+        self.start(env={'LYRA_ALLOW_PRIVATE_URLS': '1'})
+        self.fake.say('tolong buka halaman itu')
+        self.assertTrue(self.fake.wait_for(lambda: self.fake.keyboards(), 12), self.log()[-500:])
+        question = [t for t in self.fake.sent(555) if 'Izin diperlukan' in t][0]
+        self.assertIn('Buka Situs', question)
+        self.assertIn('127.0.0.1', question)
+        self.assertEqual(Handler.hits, [])                                         # not requested before the tap
+        self.fake.press(self.fake.keyboards()[0][0]['callback_data'])
+        self.assertTrue(self.fake.wait_for(lambda: any('Selesai membaca' in t for t in self.fake.sent(555)), 12), self.log()[-500:])
+        page_text = self.api.requests[-1]['messages'][-1]['content']
+        self.assertIn('Bagian Satu', page_text)
+        self.assertIn('tidak tepercaya', page_text)
+
+    def test_the_local_machine_cannot_be_opened_by_default(self):
+        call = self.tool_call('fetch_url', url='http://127.0.0.1:8123/admin')
+        self.api.custom.append((lambda last: 'buka lokal' in last, [('Saya buka.\n', 0.02), (call, 0.02)]))
+        self.start()
+        self.fake.say('tolong buka lokal')
+        self.assertTrue(self.fake.wait_for(lambda: any('Selesai membaca' in t for t in self.fake.sent(555)), 12), self.log()[-500:])
+        self.assertEqual(self.fake.keyboards(), [])
+        self.assertTrue(any('jaringan lokal' in r['messages'][-1]['content'] or 'Port 8123' in r['messages'][-1]['content']
+                            for r in self.api.requests))
 
     def test_cwd_option_sets_the_working_folder(self):
         folder = os.path.join(self.work, 'proyek')

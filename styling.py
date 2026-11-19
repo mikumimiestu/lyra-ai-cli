@@ -1357,6 +1357,8 @@ def tool_call_parts(name, arguments):
         'edit_document': ('Ubah dokumen', 'filepath'),
         'create_document': ('Buat dokumen', 'filepath'),
         'fill_template': ('Isi template', 'template'),
+        'fetch_url': ('Buka web', 'url'),
+        'send_file': ('Kirim ke Telegram', 'filepath'),
         'search': ('Cari', 'pattern'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
@@ -1885,7 +1887,7 @@ if EDITOR_AVAILABLE:
 
 # ─── Activity groups and change previews ─────────────────────────────────────
 def activity_group(name, arguments):
-    if name in ('list_directory', 'read_file', 'search'):
+    if name in ('list_directory', 'read_file', 'search', 'fetch_url'):
         return 'Eksplorasi'
     if name in ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template', 'create_directory', 'init_project'):
         return 'Perubahan'

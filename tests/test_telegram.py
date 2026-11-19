@@ -18,6 +18,7 @@ import tools
 from faketelegram import FakeTelegram
 
 TOKEN = FakeTelegram.TOKEN
+os.environ.setdefault('LYRA_GATEWAY_DIR', tempfile.mkdtemp(prefix='lyra-tg-gateway-'))      # ignore any real gateway on this computer
 
 
 class BridgeCase(unittest.TestCase):
