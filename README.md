@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.11
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.12
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,15 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.12 — Gateway tanpa layar dan lebih banyak perintah Telegram
+
+- **`amagi gateway`:** menjalankan Lyra tanpa tampilan terminal, hanya mendengarkan Telegram, dengan otak yang sama (model, tool, edit dokumen, simpan sesi). Jalan di **Windows, macOS, dan Linux**, dan tetap hidup setelah jendela terminal ditutup. Opsi: `amagi gateway --cwd FOLDER` (folder kerja), `amagi gateway status`, `amagi gateway stop`, dan `amagi gateway install` yang menampilkan file layanan (launchd di macOS, systemd di Linux) atau perintah `schtasks` (Windows) agar gateway hidup otomatis saat login. File layanan baru ditulis setelah kamu setuju, dan perintah `launchctl`, `systemctl`, atau `schtasks` kamu jalankan sendiri. Keluarannya masuk ke `~/.amagi_gateway.log` (tanpa kode warna dan tanpa token).
+- **Aturan keamanan sama:** satu chat pribadi, izin lewat tombol Izinkan/Tolak, perintah berbahaya ditolak. Hanya satu gateway per komputer, dan sesi `amagi` biasa tidak ikut mendengarkan Telegram selama gateway aktif (Telegram hanya mengizinkan satu pendengar per bot).
+- **Windows dan terminal klasik:** `/telegram setup` kini bisa dipakai untuk memasangkan chat; setelah itu jalankan `amagi gateway` untuk menerima pesan. Yang sudah pernah dipasangkan tidak perlu pairing ulang.
+- **Perintah baru di Telegram:** `/new`, `/kuota`, `/model [nomor]`, `/reasoning low|medium`, `/todos`, `/undo` (lewat tombol izin), `/compact`, `/cd`, `/pwd`, `/ls`, `/memori`, `/ingat catatan`, `/waktu`, dan `/versi`, selain `/status`, `/stop`, dan `/help`.
+- **Jaringan lebih ramah:** saat `/telegram setup`, kegagalan jaringan dicoba ulang tiga kali dengan pesan yang benar (bukan lagi "token ditolak"), dan saat sudah berjalan Lyra memberi tahu sekali bila Telegram tidak terjangkau serta saat tersambung kembali.
+- Lihat bantuan dengan `amagi --help` dan `/help telegram`.
 
 ### Baru di v2.12.11 — Kendalikan Lyra dari Telegram
 
@@ -345,7 +354,7 @@ pip install git+https://github.com/mikumimiestu/lyra-ai-cli.git
 | `/login` | Masuk dengan akun AstByte |
 | `/logout` | Keluar dari akun AstByte |
 | `/kuota` | Lihat sisa token (jendela 5 jam dan mingguan) |
-| `/telegram` | Kendalikan Lyra dari Telegram saat CLI terbuka (`setup`, `pair`, `on`, `off`, `putus`, `hapus`) |
+| `/telegram` | Kendalikan Lyra dari Telegram (`setup`, `pair`, `on`, `off`, `putus`, `hapus`); tanpa layar: `amagi gateway` |
 | `/reset-key` | Atur ulang ASTBYTE_API_KEY |
 | `/help` | Tampilkan daftar bantuan lengkap |
 | `exit` / `quit` | Keluar dari aplikasi |

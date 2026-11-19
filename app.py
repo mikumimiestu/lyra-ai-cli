@@ -8,6 +8,7 @@ if _current_dir not in sys.path:
 
 import requests
 import json
+import queue
 import styling as styling_module
 import hmac
 import secrets
@@ -29,7 +30,7 @@ from styling import (
     render_header, render_footer_bar, render_markdown_table,
     render_full_divider, format_clean_thinking_line, parse_markdown_table
 )
-from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported, run_live
+from spinner import Spinner, EscapeWatcher, LIVE, TurnCancelled, live_supported, run_live, _EOF
 from styling import (TerminalInput, COMMANDS, ActivityLog, StreamRenderer, prepare_user_message, ui_symbol,
                      fit_console_text, render_box, box_width, short_path, render_todo_lines, unicode_terminal,
                      USE_COLOR, workspace_branch, render_user_band, wrap_text_display_width, choose, NOT_INTERACTIVE,
@@ -681,6 +682,43 @@ def telegram_call(token, method, payload=None, timeout=15, session=None):
     return data.get('result')
 
 
+def telegram_error_text(error):
+    """What a TelegramError means for the user: a refused token, a busy bot API, or simply no connection."""
+    if error.code in (401, 404):
+        return "Telegram menolak token itu (salah atau sudah dicabut)."
+    if error.code == 429:
+        return "Telegram meminta menunggu sebentar (terlalu banyak permintaan)."
+    if error.code is None:
+        return ("Tidak bisa menghubungi Telegram dari jaringan ini (" + str(error)[:120] + "). Periksa koneksi, VPN, atau proxy; "
+                "jika ISP memperlambat Telegram, coba jaringan lain atau atur HTTPS_PROXY.")
+    return f"Telegram menjawab dengan kesalahan: {error}"
+
+
+def telegram_quota_text(config):
+    """/kuota for the phone: plain text, and never an exception."""
+    if not uses_account_login(config):
+        return "Kuota token hanya berlaku untuk login akun AstByte (di terminal: /login). Kamu memakai API key, jadi ditagih dari saldo developer."
+    quota = fetch_quota(config)
+    if not quota:
+        return "Gagal mengambil kuota. Coba lagi sebentar."
+    QUOTA.update(quota)
+    lines = [f"Kuota token (tier {str(quota.get('tier', '-')).upper()})"]
+    windows = (("5 jam", quota.get("used", 0), quota.get("limit", 0), quota.get("remaining", 0),
+                quota.get("resets_in_seconds") if quota.get("window_active", True) else None),
+               ("Mingguan", quota.get("week_used", 0), quota.get("week_limit", 0), quota.get("week_remaining", 0),
+                quota.get("week_resets_in_seconds") or None))
+    for name, used, limit, remaining, resets_in in windows:
+        if not limit:
+            continue
+        percent = min(100, round(used * 100 / limit))
+        when = f"reset dalam {format_duration(resets_in)}" if resets_in else "dimulai saat pesan pertama"
+        lines.append(f"{name}: sisa {remaining:,} dari {limit:,} ({percent}% terpakai) · {when}")
+    fallback = quota.get("fallback") or {}
+    lines.append("Cadangan: saldo developer aktif, dipakai setelah kuota habis." if fallback.get("enabled") and fallback.get("has_key")
+                 else "Cadangan: mati (aktifkan di web: Pengaturan → Amagi CLI).")
+    return "\n".join(lines)
+
+
 def telegram_split(text, size=3900, limit=8):
     """Telegram refuses messages over 4096 characters: cut on line breaks, at most `limit` parts."""
     text = str(text).strip() or '(selesai, tanpa teks)'
@@ -729,14 +767,20 @@ def telegram_approval_text(title, details, kind):
 
 class TelegramBridge:
     POLL_TIMEOUT = 25
+    RETRY_BASE = 1          # seconds; doubles up to 30 while Telegram is unreachable
+    NOTIFY_AFTER = 3        # consecutive failures before the terminal is told
     PAIR_TTL = 600
     APPROVAL_TTL = 180
     MAX_AGE = 300           # messages older than this (sent while Lyra was closed) are ignored
 
-    def __init__(self, config, notify=None, status=None, live=None):
+    # Commands that need the session (conversation, model, folder, memory), so the session loop runs them in order.
+    LOOP_COMMANDS = ('/new', '/model', '/reasoning', '/todos', '/undo', '/compact', '/cd', '/ls', '/pwd', '/memori', '/ingat')
+
+    def __init__(self, config, notify=None, status=None, live=None, quota=None):
         self.config = config
         self.notify = notify or (lambda text: None)
         self.status = status or (lambda: '')
+        self.quota = quota or (lambda: telegram_quota_text(self.config))
         self.live = live or LIVE
         self._stop = threading.Event()
         self._thread = None
@@ -748,6 +792,8 @@ class TelegramBridge:
         self._session = requests.Session()
         self.remote_turn = False
         self.running = False
+        self.mode = 'cli'                  # 'gateway' when there is no terminal at all
+        self.pairing_only = False          # a classic-mode terminal can pair, but cannot work on messages
         self.ready = threading.Event()          # set once the backlog from while Lyra was closed has been dropped
 
     # -- state --------------------------------------------------------------
@@ -875,7 +921,7 @@ class TelegramBridge:
 
     # -- polling --------------------------------------------------------------
     def _poll(self):
-        backoff, warned = 1, False
+        backoff, warned, failures, offline = self.RETRY_BASE, False, 0, False
         try:
             last = self._api('getUpdates', {'offset': -1, 'timeout': 0}) or []
             if last:
@@ -890,13 +936,22 @@ class TelegramBridge:
                 updates = self._api('getUpdates', {'offset': self._offset, 'timeout': self.POLL_TIMEOUT,
                                                    'allowed_updates': ['message', 'callback_query']},
                                     timeout=self.POLL_TIMEOUT + 10)
-                backoff, warned = 1, False
+                backoff, warned, failures = self.RETRY_BASE, False, 0
+                if offline:
+                    offline = False
+                    self.notify("Telegram tersambung kembali.")
             except TelegramError as error:
                 if error.code == 401:
                     return self._reject_token()
                 if error.code == 409 and not warned:
                     warned = True
                     self.notify("Telegram: bot ini sedang dipakai Lyra lain (satu bot untuk satu CLI). Menunggu...")
+                elif error.code != 409:
+                    failures += 1
+                    if failures >= self.NOTIFY_AFTER and not offline:
+                        offline = True
+                        self.notify("Telegram tidak terjangkau dari jaringan ini; Lyra terus mencoba di latar. "
+                                    "Periksa koneksi, VPN, atau proxy.")
                 self._stop.wait(backoff)
                 backoff = min(30, backoff * 2)
                 continue
@@ -943,15 +998,27 @@ class TelegramBridge:
         self.config['telegram_chat_id'] = chat_id
         self.config['telegram_enabled'] = True
         save_config(self.config)
+        if self.pairing_only:
+            self.send("✅ Terhubung. Jalankan `amagi gateway` di komputermu supaya Lyra mulai menerima pesan dari sini.", chat=chat_id)
+            self.notify("Telegram terhubung. Jalankan: amagi gateway  (terminal ini tidak menerima pesan Telegram).")
+            self._stop.set()
+            self.running = False
+            return
         self.send("✅ Terhubung. Kirim pesan biasa untuk menyuruh Lyra bekerja.\n\n" + self._help(), chat=chat_id)
         self.notify("Telegram terhubung. Pesan dari chat itu kini diteruskan ke Lyra.")
 
     def _help(self):
-        return ("Perintah:\n/status  ringkasan sesi\n/stop  hentikan pekerjaan yang berjalan\n/help  bantuan ini\n\n"
-                "Pesan biasa dikirim ke Lyra. Setiap penulisan file atau perintah meminta izinmu lewat tombol di sini; "
-                "perintah berbahaya hanya bisa disetujui di terminal.")
+        return ("Pesan biasa dikirim ke Lyra. Perintah:\n"
+                "/status  ringkasan sesi\n/stop  hentikan pekerjaan yang berjalan\n/new  mulai percakapan baru\n"
+                "/kuota  sisa token\n/model [nomor]  lihat atau ganti model\n/reasoning [low|medium]  tingkat penalaran\n"
+                "/todos  daftar tugas Lyra\n/undo  urungkan perubahan file terakhir (minta izin)\n"
+                "/compact  ringkas percakapan agar konteks longgar\n/cd <folder>, /pwd, /ls [folder]  folder kerja\n"
+                "/memori, /ingat <catatan>  memori\n/waktu, /versi, /help\n\n"
+                "Setiap penulisan file atau perintah meminta izinmu lewat tombol di sini; perintah berbahaya hanya bisa disetujui di terminal.")
 
     def _command(self, text):
+        if self.pairing_only:
+            return self.send("Lyra di komputermu belum menerima pesan. Jalankan: amagi gateway")
         word = text.split()[0].lower().split('@')[0] if text.startswith('/') else ''
         if word in ('/start', '/help'):
             return self.send(self._help())
@@ -965,8 +1032,14 @@ class TelegramBridge:
             if cancelled:
                 self.live.request_cancel()
             return self.send("⛔ Dihentikan." if cancelled else "Tidak ada pekerjaan yang sedang berjalan.")
-        if word:
-            return self.send("Perintah itu hanya tersedia di terminal. Di sini: /status, /stop, /help. Pesan biasa dikirim ke Lyra.")
+        if word == '/kuota':
+            return self.send(self.quota())
+        if word == '/waktu':
+            return self.send(get_system_time())
+        if word == '/versi':
+            return self.send(f"Lyra CLI v{VERSION}")
+        if word and word not in self.LOOP_COMMANDS:
+            return self.send("Perintah itu hanya tersedia di terminal. Ketik /help untuk daftar yang tersedia di sini.")
         if text.lower() in ('exit', 'quit'):
             return self.send("Untuk keluar dari Lyra, ketik langsung di terminal.")
         if len(text) > 8000:
@@ -1531,6 +1604,8 @@ def _read_secret(prompt):
     return runner(ask) if runner is not None else ask()
 
 
+TELEGRAM_SETUP_TRIES = 3
+TELEGRAM_SETUP_PAUSE = 2
 TELEGRAM_TOKEN_FORMAT = re.compile(r'^\d{6,12}:[A-Za-z0-9_-]{30,60}$')
 
 
@@ -1552,10 +1627,13 @@ def handle_telegram_command(user_input, config, state, live, make_bridge):
     """/telegram setup | pair | on | off | putus | hapus | status"""
     parts = user_input.split()
     sub = parts[1].lower() if len(parts) > 1 else "status"
-    if live is None:
-        print(f"\n  {YELLOW}Telegram butuh konsol live (macOS dan Linux). Windows dan terminal non-interaktif belum didukung.{RESET}\n")
-        return
     bridge = state.get("bridge")
+    if sub in ("setup", "pair", "on") and gateway_state():
+        print(f"\n  {YELLOW}Gateway sedang berjalan dan memegang bot ini. Hentikan dulu: amagi gateway stop{RESET}\n")
+        return
+    if live is None and sub == "on":
+        print(f"\n  {YELLOW}Terminal ini tidak bisa menerima pesan Telegram (Windows dan mode klasik). Jalankan: amagi gateway{RESET}\n")
+        return
 
     def pairing_instructions(bridge):
         code = bridge.begin_pairing()
@@ -1583,24 +1661,34 @@ def handle_telegram_command(user_input, config, state, live, make_bridge):
         if not TELEGRAM_TOKEN_FORMAT.match(token):
             print(f"  {RED}Format token tidak dikenali. Salin ulang dari @BotFather.{RESET}\n")
             return
-        try:
-            info = telegram_call(token, "getMe")
-        except TelegramError as error:
-            print(f"  {RED}Telegram menolak token itu ({error}).{RESET}\n")
-            return
+        info = None
+        for attempt in range(1, TELEGRAM_SETUP_TRIES + 1):
+            try:
+                info = telegram_call(token, "getMe", timeout=20)
+                break
+            except TelegramError as error:
+                if error.code is None and attempt < TELEGRAM_SETUP_TRIES:
+                    print(f"  {COLOR_DIM}Telegram belum menjawab (percobaan {attempt}/{TELEGRAM_SETUP_TRIES}), mencoba lagi...{RESET}")
+                    time.sleep(TELEGRAM_SETUP_PAUSE)
+                    continue
+                print(f"  {RED}{telegram_error_text(error)}{RESET}")
+                print(f"  {COLOR_DIM}Token belum disimpan. Jalankan /telegram setup lagi setelah koneksinya beres.{RESET}\n")
+                return
         if bridge is not None:
             bridge.stop()
         config.update({"telegram_token": token, "telegram_bot": (info or {}).get("username", ""), "telegram_enabled": True})
         config.pop("telegram_chat_id", None)
         save_config(config)
-        bridge = state["bridge"] = make_bridge()
+        bridge = state["bridge"] = make_bridge(pairing_only=live is None)
         bridge.start()
         print(f"  {GREEN}✓ Token diterima: @{config['telegram_bot']}{RESET}")
         pairing_instructions(bridge)
+        if live is None:
+            print(f"  {COLOR_DIM}Terminal ini hanya memasangkan. Setelah terhubung, jalankan: amagi gateway{RESET}\n")
     elif not config.get("telegram_token"):
         print(f"\n  {YELLOW}Belum diatur. Jalankan /telegram setup.{RESET}\n")
     elif sub == "pair":
-        bridge = state["bridge"] = bridge or make_bridge()
+        bridge = state["bridge"] = bridge or make_bridge(pairing_only=live is None)
         bridge.start()
         pairing_instructions(bridge)
     elif sub == "on":
@@ -1644,6 +1732,269 @@ def config_file_label():
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Gateway: Lyra without a screen, driven only from Telegram ───────────────
+# `amagi gateway` runs the same agent loop as the interactive CLI, but its input is the Telegram queue and its output
+# goes to a log file, so it works on Windows too and keeps running after the terminal is closed (see `gateway install`).
+GATEWAY_BEAT = 5            # seconds between heartbeats written to the lock file
+GATEWAY_STALE = 20          # a lock whose heartbeat is older than this belongs to a gateway that is gone
+
+
+def gateway_paths():
+    base = os.environ.get("LYRA_GATEWAY_DIR") or os.path.expanduser("~")
+    return {kind: os.path.join(base, f".amagi_gateway.{kind}") for kind in ("lock", "stop", "log")}
+
+
+def gateway_state():
+    """The lock-file record of a gateway that is running right now, or None."""
+    try:
+        with open(gateway_paths()["lock"], encoding="utf-8") as handle:
+            data = json.load(handle)
+        if time.time() - float(data.get("beat", 0)) <= GATEWAY_STALE:
+            return data
+    except (OSError, ValueError, TypeError):
+        pass
+    return None
+
+
+class GatewayLock:
+    """One gateway per computer (Telegram allows one listener per bot). A heartbeat keeps the lock fresh and also
+    watches for the stop file written by `amagi gateway stop`."""
+
+    def __init__(self, cwd):
+        self.cwd = cwd
+        self.started = time.time()
+        self._stop = threading.Event()
+        self._thread = None
+
+    def acquire(self):
+        other = gateway_state()
+        if other and other.get("pid") != os.getpid():
+            return False
+        try:
+            os.remove(gateway_paths()["stop"])        # a stale stop request must not end the new gateway at once
+        except OSError:
+            pass
+        self._write()
+        self._thread = threading.Thread(target=self._beat, name="lyra-gateway-lock", daemon=True)
+        self._thread.start()
+        return True
+
+    def _write(self):
+        path = gateway_paths()["lock"]
+        record = {"pid": os.getpid(), "started": self.started, "beat": time.time(), "cwd": self.cwd, "version": VERSION}
+        try:
+            temp = path + ".tmp"
+            with open(temp, "w", encoding="utf-8") as handle:
+                json.dump(record, handle)
+            os.replace(temp, path)
+        except OSError:
+            pass
+
+    def _beat(self):
+        while not self._stop.wait(GATEWAY_BEAT):
+            self._write()
+            stop_file = gateway_paths()["stop"]
+            if os.path.exists(stop_file):
+                try:
+                    os.remove(stop_file)
+                except OSError:
+                    pass
+                LIVE.submit_eof()
+                return
+
+    def release(self):
+        self._stop.set()
+        try:
+            os.remove(gateway_paths()["lock"])
+        except OSError:
+            pass
+
+
+class GatewayInput:
+    """Stands in for the terminal editor: waits for the next message from Telegram. Ctrl+C at idle ends the gateway."""
+    session = None
+    notice = ""
+
+    def __init__(self, live):
+        self.live = live
+
+    def read(self):
+        live = self.live
+        live.busy = False
+        while True:
+            try:
+                item = live.inbox.get(timeout=0.5)       # a timeout keeps Ctrl+C responsive on Windows too
+                break
+            except queue.Empty:
+                continue
+            except KeyboardInterrupt:
+                raise EOFError
+        if item is _EOF:
+            raise EOFError
+        live.cancel.clear()
+        live.busy = True
+        return item
+
+
+class PlainLog:
+    """Log file that never receives terminal colour codes."""
+
+    def __init__(self, handle):
+        self.handle = handle
+        self.encoding = getattr(handle, "encoding", None) or "utf-8"     # code that prints asks sys.stdout for these
+        self.errors = "replace"
+
+    def write(self, text):
+        self.handle.write(strip_ansi(text))
+        return len(text)
+
+    def writable(self):
+        return True
+
+    def flush(self):
+        self.handle.flush()
+
+    def isatty(self):
+        return False
+
+
+def has_credentials(config):
+    return bool(os.getenv("ASTBYTE_API_KEY", "").strip() or (config.get("auth_method") == "account" and config.get("cli_token"))
+                or str(config.get("api_key", "")).strip())
+
+
+def gateway_problem(config):
+    if not (config.get("telegram_token") and config.get("telegram_chat_id")):
+        return ("Telegram belum dipasangkan. Jalankan amagi, ketik /telegram setup, lalu kirim kode pairing ke bot. "
+                "Setelah itu jalankan lagi: amagi gateway")
+    if not has_credentials(config):
+        return "Belum masuk. Jalankan amagi sekali untuk login atau mengatur API key, lalu coba lagi."
+    return None
+
+
+def run_gateway(cwd=None):
+    """amagi gateway: returns the exit code."""
+    config = load_config()
+    problem = gateway_problem(config)
+    if problem:
+        sys.stderr.write(problem + "\n")
+        return 2
+    if cwd:
+        folder = os.path.abspath(os.path.expanduser(cwd))
+        if not os.path.isdir(folder):
+            sys.stderr.write(f"Folder tidak ditemukan: {cwd}\n")
+            return 2
+        os.chdir(folder)
+    lock = GatewayLock(os.getcwd())
+    if not lock.acquire():
+        other = gateway_state() or {}
+        sys.stderr.write(f"Gateway sudah berjalan (pid {other.get('pid', '?')}). Hentikan dulu dengan: amagi gateway stop\n")
+        return 1
+    log_path = gateway_paths()["log"]
+    try:
+        if os.path.getsize(log_path) > 2 * 1024 * 1024:
+            os.replace(log_path, log_path + ".1")
+    except OSError:
+        pass
+    sys.stdout.write(f"Lyra gateway aktif (@{config.get('telegram_bot', 'bot')}). Folder kerja: {os.getcwd()}\n"
+                     f"Log: {log_path}\nTekan Ctrl+C untuk berhenti, atau jalankan: amagi gateway stop\n")
+    sys.stdout.flush()
+    with open(log_path, "a", encoding="utf-8", buffering=1) as handle:
+        log = PlainLog(handle)
+        log.write(f"\n=== gateway mulai {time.strftime('%Y-%m-%d %H:%M:%S')} v{VERSION} ===\n")
+        try:
+            with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+                _run_session(None, gateway=True)
+        finally:
+            lock.release()
+            log.write(f"=== gateway berhenti {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    sys.stdout.write("Gateway berhenti.\n")
+    return 0
+
+
+def gateway_service_plan(system=None):
+    """What `amagi gateway install` shows: (file path or None, file content or None, commands to run yourself)."""
+    system = system or sys.platform
+    python, script = sys.executable, os.path.abspath(__file__)
+    log = gateway_paths()["log"]
+    home = os.path.expanduser("~")
+    if system == "darwin":
+        path = os.path.join(home, "Library", "LaunchAgents", "id.astbyte.amagi-gateway.plist")
+        content = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                   '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                   '<plist version="1.0">\n<dict>\n'
+                   '  <key>Label</key><string>id.astbyte.amagi-gateway</string>\n'
+                   f'  <key>ProgramArguments</key><array><string>{python}</string><string>{script}</string><string>gateway</string></array>\n'
+                   f'  <key>WorkingDirectory</key><string>{home}</string>\n'
+                   '  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n'
+                   f'  <key>StandardOutPath</key><string>{log}</string>\n  <key>StandardErrorPath</key><string>{log}</string>\n'
+                   '</dict>\n</plist>\n')
+        return path, content, [f"launchctl load -w {path}", f"launchctl unload {path}   (untuk mematikan)"]
+    if system.startswith("linux"):
+        path = os.path.join(home, ".config", "systemd", "user", "amagi-gateway.service")
+        content = ("[Unit]\nDescription=Amagi CLI gateway (Telegram)\nAfter=network-online.target\n\n"
+                   f"[Service]\nExecStart={python} {script} gateway\nWorkingDirectory={home}\nRestart=on-failure\nRestartSec=10\n\n"
+                   "[Install]\nWantedBy=default.target\n")
+        return path, content, ["systemctl --user daemon-reload", "systemctl --user enable --now amagi-gateway",
+                               "loginctl enable-linger $USER   (agar tetap hidup walau kamu logout)",
+                               "systemctl --user disable --now amagi-gateway   (untuk mematikan)"]
+    windowless = os.path.join(os.path.dirname(python), "pythonw.exe")
+    runner = windowless if os.path.exists(windowless) else python
+    return None, None, [f'schtasks /Create /TN "AmagiGateway" /SC ONLOGON /TR "\\"{runner}\\" \\"{script}\\" gateway" /F',
+                        'schtasks /Delete /TN "AmagiGateway" /F   (untuk mematikan)']
+
+
+def gateway_command(sub, cwd=None):
+    """amagi gateway [status|stop|install]. Returns the exit code."""
+    paths = gateway_paths()
+    if sub in ("", "run"):
+        return run_gateway(cwd)
+    if sub == "status":
+        state = gateway_state()
+        if not state:
+            print("Gateway tidak berjalan.")
+            return 1
+        started = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(state.get("started", 0)))
+        print(f"Gateway berjalan (pid {state.get('pid')}, sejak {started}, v{state.get('version', '?')}).\n"
+              f"Folder kerja: {state.get('cwd')}\nLog: {paths['log']}")
+        return 0
+    if sub == "stop":
+        if not gateway_state():
+            print("Gateway tidak berjalan.")
+            return 1
+        with open(paths["stop"], "w", encoding="utf-8") as handle:
+            handle.write("stop\n")
+        deadline = time.time() + GATEWAY_BEAT + 10
+        while time.time() < deadline:
+            if not gateway_state():
+                print("Gateway dihentikan.")
+                return 0
+            time.sleep(0.5)
+        print("Permintaan berhenti terkirim, tetapi gateway belum menutup. Coba lagi sebentar lagi.")
+        return 1
+    if sub == "install":
+        path, content, commands = gateway_service_plan()
+        print("Agar gateway hidup otomatis saat kamu masuk ke komputer:")
+        if path:
+            print(f"\nFile layanan: {path}\n-----\n{content}-----")
+            if sys.stdin is not None and sys.stdin.isatty():
+                try:
+                    answer = input(f"Tulis file itu sekarang? (y/n) ❯ ").strip().lower()
+                except EOFError:
+                    answer = ""
+                if answer in ("y", "ya", "yes"):
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "w", encoding="utf-8") as handle:
+                        handle.write(content)
+                    print(f"Tersimpan: {path}")
+        print("\nLalu jalankan sendiri perintah berikut:")
+        for command in commands:
+            print(f"  {command}")
+        return 0
+    sys.stderr.write("Pilihan: amagi gateway [status | stop | install], opsional --cwd FOLDER untuk menjalankan.\n")
+    return 2
+
+
 CLI_HELP = """Lyra CLI v{version} - asisten AI AstByte di terminal
 
 Pemakaian:
@@ -1651,6 +2002,8 @@ Pemakaian:
   amagi -c, --continue          Lanjutkan percakapan terakhir
   amagi -p "pertanyaan"         Satu kali tanya lalu keluar
   cat berkas | amagi -p "ringkas"   Sertakan isi stdin sebagai konteks
+  amagi gateway [--cwd FOLDER]  Jalankan tanpa layar, dikendalikan dari Telegram (juga di Windows)
+  amagi gateway status|stop|install   Cek, hentikan, atau pasang agar hidup otomatis
   amagi -V, --version           Tampilkan versi
   amagi -h, --help              Tampilkan bantuan ini
 
@@ -1662,7 +2015,7 @@ Mode -p (non-interaktif):
 
 Variabel lingkungan:
   ASTBYTE_API_KEY, LYRA_CLASSIC, LYRA_ASCII, NO_COLOR, LYRA_NO_ANIMATION,
-  LYRA_NO_HISTORY, LYRA_SESSIONS_DIR, LYRA_CONTEXT_TOKENS
+  LYRA_NO_HISTORY, LYRA_SESSIONS_DIR, LYRA_CONTEXT_TOKENS, LYRA_TELEGRAM_API, LYRA_GATEWAY_DIR
 
 Di dalam sesi, ketik /help, atau /help <perintah> untuk penjelasan satu perintah."""
 
@@ -1672,10 +2025,27 @@ PRINT_MODE_STDIN_LIMIT = 256 * 1024
 
 def parse_cli_args(argv):
     """Returns (options, error). Unknown options are an error so typos never open a session."""
-    opts = {"version": False, "help": False, "print": None, "print_given": False, "continue": False, "daemon": False}
+    opts = {"version": False, "help": False, "print": None, "print_given": False, "continue": False, "daemon": False,
+            "gateway": None, "cwd": None}
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg == "gateway" and i == 0:
+            opts["gateway"] = ""
+            rest = argv[1:]
+            j = 0
+            while j < len(rest):
+                if rest[j] in ("status", "stop", "install", "run") and not opts["gateway"]:
+                    opts["gateway"] = rest[j]
+                elif rest[j] == "--cwd" and j + 1 < len(rest):
+                    opts["cwd"] = rest[j + 1]
+                    j += 1
+                elif rest[j].startswith("--cwd="):
+                    opts["cwd"] = rest[j][len("--cwd="):]
+                else:
+                    return opts, f"Opsi gateway tidak dikenal: {rest[j]}. Pakai: amagi gateway [status|stop|install] [--cwd FOLDER]."
+                j += 1
+            return opts, None
         if arg in ("--daemon", "daemon"):
             opts["daemon"] = True
         elif arg in ("--version", "-V"):
@@ -1813,6 +2183,8 @@ def main():
         sys.exit(0)
     if opts["print_given"]:
         sys.exit(run_print_mode(opts["print"]))
+    if opts["gateway"] is not None:
+        sys.exit(gateway_command(opts["gateway"], opts["cwd"]))
 
     if live_supported():
         # The composer stays at the bottom while Lyra works; the agent loop runs in a worker thread.
@@ -1828,7 +2200,9 @@ def farewell_telegram():
     bridge = ACTIVE_BRIDGE[0]
     if bridge is not None and bridge.paired and bridge.running:
         try:
-            telegram_call(bridge.token, 'sendMessage', {'chat_id': bridge.chat_id, 'text': '🔌 Lyra ditutup. Pesanmu tidak lagi diterima sampai CLI dibuka lagi.'}, timeout=4)
+            text = ('🔌 Gateway Lyra dihentikan. Pesanmu tidak lagi diterima sampai dijalankan lagi (amagi gateway).'
+                    if bridge.mode == 'gateway' else '🔌 Lyra ditutup. Pesanmu tidak lagi diterima sampai CLI dibuka lagi.')
+            telegram_call(bridge.token, 'sendMessage', {'chat_id': bridge.chat_id, 'text': text}, timeout=4)
         except TelegramError:
             pass
         bridge.stop()
@@ -1843,7 +2217,7 @@ def end_session(live, message):
     clear_terminal()
     print(message)
 
-def _run_session(live=None):
+def _run_session(live=None, gateway=False):
     config  = load_config()
     if migrate_model_config(config):
         save_config(config)
@@ -1895,9 +2269,10 @@ def _run_session(live=None):
     threading.Thread(target=_bg_check_update, daemon=True).start()
 
     # Compact Lyra welcome
-    render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd, MODELS[model_idx]["supports_reasoning"])
-    check_editor_dependency(config)
-    editor = TerminalInput(lambda: {
+    if not gateway:
+        render_header(MODELS[model_idx]["name"], reasoning_effort, active_cwd, MODELS[model_idx]["supports_reasoning"])
+        check_editor_dependency(config)
+    editor = GatewayInput(LIVE) if gateway else TerminalInput(lambda: {
         "model": MODELS[model_idx]["name"],
         "effort": config.get("reasoning_effort", "medium"),
         "directory": active_cwd,
@@ -1920,20 +2295,108 @@ def _run_session(live=None):
         print(f"\n  {COLOR_DIM}✈ {text}{RESET}")
 
     def telegram_summary():
-        busy = "sedang bekerja" if (live is not None and live.busy) else "siap"
-        return (f"Lyra v{VERSION} ({busy})\nModel: {MODELS[model_idx]['name']} ({config.get('reasoning_effort', 'medium')})\n"
+        control = live if live is not None else LIVE
+        busy = "sedang bekerja" if control.busy else "siap"
+        return (f"Lyra v{VERSION} ({busy}{', mode gateway' if gateway else ''})\n"
+                f"Model: {MODELS[model_idx]['name']} ({config.get('reasoning_effort', 'medium')})\n"
                 f"Folder: {short_path(active_cwd)}\nPersetujuan: {APPROVAL_LABELS[APPROVAL.mode]} (dari Telegram selalu ditanya)\n"
-                f"Antrean: {live.inbox.qsize() if live is not None else 0} pesan")
+                f"Antrean: {control.inbox.qsize()} pesan")
 
-    def make_bridge():
+    def make_bridge(pairing_only=False):
         bridge = TelegramBridge(config, notify=telegram_notice, status=telegram_summary, live=live)
+        bridge.mode = "gateway" if gateway else "cli"
+        bridge.pairing_only = pairing_only
         ACTIVE_BRIDGE[0] = bridge
         return bridge
 
-    if live is not None and config.get("telegram_enabled") and config.get("telegram_token") and config.get("telegram_chat_id"):
-        telegram["bridge"] = make_bridge()
-        telegram["bridge"].start()
-        print(f"  {COLOR_DIM}✈ Telegram aktif (@{config.get('telegram_bot', 'bot')}) {ui_symbol('·', '-')} /telegram off untuk mematikan{RESET}")
+    if (live is not None or gateway) and config.get("telegram_enabled") and config.get("telegram_token") and config.get("telegram_chat_id"):
+        if not gateway and gateway_state():
+            print(f"  {COLOR_DIM}✈ Telegram sedang dikelola gateway (amagi gateway); sesi ini tidak ikut mendengarkan.{RESET}")
+        else:
+            telegram["bridge"] = make_bridge()
+            telegram["bridge"].start()
+            print(f"  {COLOR_DIM}✈ Telegram aktif (@{config.get('telegram_bot', 'bot')}) {ui_symbol('·', '-')} /telegram off untuk mematikan{RESET}")
+
+    def remote_command(text):
+        """The commands that may arrive from Telegram: no menus and nothing secret typed on a phone. Returns the reply."""
+        nonlocal messages, model_idx, active_cwd, context_warned, session_id, session_started
+        parts = text.split(maxsplit=1)
+        word = parts[0].lower().split("@")[0]
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        if word == "/new":
+            messages = [{"role": "system", "content": get_current_system_prompt()}]
+            todo_list.clear()
+            context_warned = False
+            session_id, session_started = new_session_id(), time.time()
+            return "🆕 Percakapan baru dimulai."
+        if word == "/pwd":
+            return f"📁 {active_cwd}"
+        if word == "/cd":
+            if not arg:
+                return "Pakai: /cd <folder>"
+            target = os.path.expanduser(arg)
+            target = target if os.path.isabs(target) else os.path.join(active_cwd, target)
+            if not os.path.isdir(target):
+                return f"Folder tidak ditemukan: {arg}"
+            active_cwd = os.path.abspath(target)
+            os.chdir(active_cwd)
+            return f"✓ Folder aktif: {active_cwd}"
+        if word == "/ls":
+            target = os.path.join(active_cwd, os.path.expanduser(arg)) if arg else active_cwd
+            return list_directory(target, recursive=True, depth=2)
+        if word == "/todos":
+            if not todo_list.items:
+                return "Belum ada daftar tugas. Lyra membuatnya sendiri untuk pekerjaan multi-langkah."
+            icons = {"completed": "✔", "in_progress": "◐", "pending": "☐"}
+            return "Daftar tugas:\n" + "\n".join(f"{icons.get(i['status'], '☐')} {i['content']}" for i in todo_list.items)
+        if word == "/undo":
+            if arg.lower() == "list":
+                return "\n".join(describe_undo_stack()) or "Belum ada perubahan yang bisa diurungkan."
+            return strip_ansi(undo_last())
+        if word == "/compact":
+            if len([m for m in messages if m["role"] != "system"]) < 2:
+                return "Percakapan masih pendek, belum perlu diringkas."
+            before = estimate_context_tokens(messages)
+            messages = handle_compact_command(messages, headers, canonical_model_id(MODELS[model_idx]["id"]),
+                                              config.get("reasoning_effort", "medium"), arg)
+            after = estimate_context_tokens(messages)
+            return f"✅ Diringkas: ~{before:,} → ~{after:,} token." if after < before else "Tidak ada yang diringkas (gagal atau terlalu pendek)."
+        if word == "/model":
+            if not arg:
+                lines = [f"{i}. {m['name']}" + (" (reasoning)" if m["supports_reasoning"] else " (tanpa reasoning)")
+                         + ("  ✓ dipakai" if i - 1 == model_idx else "") for i, m in enumerate(MODELS, 1)]
+                return "Model:\n" + "\n".join(lines) + "\n\nGanti dengan /model <nomor>."
+            if not arg.isdigit() or not 1 <= int(arg) <= len(MODELS):
+                return f"Nomor model tidak valid (1-{len(MODELS)}). Ketik /model untuk daftarnya."
+            model_idx = int(arg) - 1
+            config["model_index"] = model_idx
+            if not MODELS[model_idx].get("supports_reasoning"):
+                config["reasoning_effort"] = "low"
+            save_config(config)
+            return f"✓ Model: {MODELS[model_idx]['name']}"
+        if word == "/reasoning":
+            if not MODELS[model_idx].get("supports_reasoning"):
+                return f"{MODELS[model_idx]['name']} tidak mendukung penalaran."
+            names = {"low": "low", "cepat": "low", "medium": "medium", "sedang": "medium"}
+            if not arg:
+                return f"Tingkat penalaran sekarang: {config.get('reasoning_effort', 'medium')}. Ganti dengan /reasoning low atau /reasoning medium."
+            if arg.lower() not in names:
+                return "Pilihan: low atau medium."
+            config["reasoning_effort"] = names[arg.lower()]
+            save_config(config)
+            return f"✓ Penalaran: {names[arg.lower()]}"
+        if word == "/memori":
+            notes, _lines = memory_body(read_memory())
+            if not notes:
+                return "Memori masih kosong. Tambah dengan /ingat <catatan>."
+            shown = notes[-8:]
+            return f"Memori ({len(notes)} catatan, 8 terakhir):\n" + "\n".join(
+                f"• {note[:160]}" + (f" ({stamp})" if stamp else "") for stamp, note in shown)
+        if word == "/ingat":
+            if not arg:
+                return "Pakai: /ingat <catatan>"
+            return strip_ansi(save_memory(arg))
+        return "Perintah itu hanya tersedia di terminal."
 
     # ── Loop utama ────────────────────────────────────────────────────────────
     while True:
@@ -1962,6 +2425,9 @@ def _run_session(live=None):
                 break
 
             if not user_input:
+                continue
+            if remote and user_input.startswith("/"):
+                telegram["bridge"].reply(strip_ansi(str(remote_command(user_input))))
                 continue
             if getattr(editor, "session", None) is not None:
                 render_user_band(("✈ " if remote else "") + user_input)

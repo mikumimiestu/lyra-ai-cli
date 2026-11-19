@@ -132,9 +132,9 @@ class MessageTests(BridgeCase):
         self.assertEqual(len(self.inbox()), 1)
 
     def test_terminal_only_commands_exit_and_huge_messages_are_not_forwarded(self):
-        for text in ('/model', '/memory', '/telegram off', 'exit', 'quit', 'x' * 9000):
+        for text in ('/memory', '/telegram off', '/login', '/update', 'exit', 'quit', 'x' * 9000):
             self.fake.say(text)
-        self.assertTrue(self.fake.wait_for(lambda: len(self.fake.sent(555)) >= 7))
+        self.assertTrue(self.fake.wait_for(lambda: len(self.fake.sent(555)) >= 8))
         self.assertEqual(self.inbox(), [])
         replies = ' '.join(self.fake.sent(555))
         self.assertIn('hanya tersedia di terminal', replies)
@@ -162,6 +162,38 @@ class MessageTests(BridgeCase):
         self.settle()
         self.assertEqual(self.inbox(), [])
         self.assertEqual(len(self.fake.sent()), before)
+
+    def test_new_phone_commands_are_forwarded_or_answered_directly(self):
+        self.bridge.quota = lambda: 'KUOTA-UJI'
+        for text in ('/new', '/model 2', '/reasoning low', '/todos', '/undo', '/compact fokus', '/cd /tmp', '/ls', '/pwd', '/memori', '/ingat beli susu'):
+            self.fake.say(text)
+        self.assertTrue(self.fake.wait_for(lambda: self.live.inbox.qsize() >= 11))
+        items = self.inbox()
+        self.assertEqual([str(i) for i in items][:3], ['/new', '/model 2', '/reasoning low'])
+        self.assertTrue(all(isinstance(i, app.RemoteText) for i in items))
+        self.fake.say('/kuota')
+        self.fake.say('/versi')
+        self.fake.say('/waktu')
+        self.assertTrue(self.fake.wait_for(lambda: any('KUOTA-UJI' in t for t in self.fake.sent(555))))
+        self.assertTrue(self.fake.wait_for(lambda: any(f'v{app.VERSION}' in t for t in self.fake.sent(555))))
+        self.assertTrue(self.fake.wait_for(lambda: len(self.fake.sent(555)) >= 4))
+        self.assertEqual(self.inbox(), [])                                  # the direct ones never reach the session
+
+    def test_help_lists_the_phone_commands(self):
+        self.fake.say('/help')
+        self.assertTrue(self.fake.wait_for(lambda: any('/kuota' in t and '/model' in t and '/new' in t for t in self.fake.sent(555))))
+
+    def test_quota_text_for_api_key_and_account_users(self):
+        self.assertIn('API key', app.telegram_quota_text({}))
+        quota = {'tier': 'pro', 'used': 100, 'limit': 1000, 'remaining': 900, 'resets_in_seconds': 3600, 'window_active': True,
+                 'week_used': 100, 'week_limit': 9000, 'week_remaining': 8900, 'week_resets_in_seconds': 86400 * 2}
+        with patch.object(app, 'uses_account_login', return_value=True), patch.object(app, 'fetch_quota', return_value=quota):
+            text = app.telegram_quota_text({})
+        self.assertIn('tier PRO', text)
+        self.assertIn('5 jam: sisa 900 dari 1,000 (10% terpakai) · reset dalam 1 jam', text)
+        self.assertIn('Mingguan', text)
+        with patch.object(app, 'uses_account_login', return_value=True), patch.object(app, 'fetch_quota', return_value=None):
+            self.assertIn('Gagal mengambil', app.telegram_quota_text({}))
 
     def test_group_and_non_text_messages_are_ignored(self):
         self.fake.say('di grup', chat=-100123, chat_type='group')
@@ -201,6 +233,16 @@ class StartupTests(BridgeCase):
         self.assertTrue(self.fake.wait_for(lambda: any('Lyra lain' in n for n in self.notices)))
         self.settle(1.5)
         self.assertEqual(len([n for n in self.notices if 'Lyra lain' in n]), 1)
+
+    def test_the_terminal_is_told_once_when_telegram_is_unreachable_and_when_it_is_back(self):
+        with patch.object(app.TelegramBridge, 'RETRY_BASE', 0.05), patch.object(app.TelegramBridge, 'NOTIFY_AFTER', 3), \
+             patch.dict(os.environ, {'LYRA_TELEGRAM_API': 'http://127.0.0.1:9'}):
+            self.bridge.start()
+            self.assertTrue(self.fake.wait_for(lambda: any('tidak terjangkau' in n for n in self.notices), 10))
+            self.settle(0.6)
+            self.assertEqual(len([n for n in self.notices if 'tidak terjangkau' in n]), 1)      # not once per failed attempt
+        with patch.object(app.TelegramBridge, 'RETRY_BASE', 0.05):
+            self.assertTrue(self.fake.wait_for(lambda: any('tersambung kembali' in n for n in self.notices), 20))
 
     def test_errors_never_contain_the_token(self):
         with patch.dict(os.environ, {'LYRA_TELEGRAM_API': 'http://127.0.0.1:9'}):
@@ -369,8 +411,9 @@ class CommandTests(BridgeCase):
         out = io.StringIO()
         made = []
 
-        def make():
+        def make(pairing_only=False):
             bridge = app.TelegramBridge(self.config, notify=self.notices.append, status=lambda: '', live=self.live)
+            bridge.pairing_only = pairing_only
             made.append(bridge)
             self.addCleanup(bridge.stop)
             return bridge
@@ -404,6 +447,45 @@ class CommandTests(BridgeCase):
         self.assertIn('menolak token', page)
         self.assertNotIn('telegram_token', self.config)
 
+    def test_a_network_failure_is_retried_and_not_called_a_rejected_token(self):
+        self.config.clear()
+        with patch.dict(os.environ, {'LYRA_TELEGRAM_API': 'http://127.0.0.1:9'}), patch.object(app.time, 'sleep') as pause:
+            page, state, made = self.run_command('/telegram setup')
+        self.assertNotIn('menolak', page)
+        self.assertIn('Tidak bisa menghubungi Telegram', page)
+        self.assertIn('percobaan 1/3', page)
+        self.assertIn('percobaan 2/3', page)
+        self.assertIn('Token belum disimpan', page)
+        self.assertEqual(pause.call_count, 2)
+        self.assertEqual(self.config, {})
+        self.assertIsNone(state['bridge'])
+        self.assertNotIn(TOKEN, page)
+
+    def test_a_flaky_connection_that_recovers_still_finishes_setup(self):
+        self.config.clear()
+        real = app.telegram_call
+        attempts = []
+
+        def flaky(token, method, payload=None, timeout=15, session=None):
+            attempts.append(method)
+            if method == 'getMe' and len(attempts) == 1:
+                raise app.TelegramError('Read timed out')
+            return real(token, method, payload, timeout, session)
+        with patch.object(app, 'telegram_call', side_effect=flaky), patch.object(app.time, 'sleep'):
+            page, state, _ = self.run_command('/telegram setup')
+        self.assertIn('percobaan 1/3', page)
+        self.assertEqual(self.config['telegram_token'], TOKEN)
+        self.assertIn('Token diterima', page)
+
+    def test_error_texts_distinguish_the_causes(self):
+        self.assertIn('menolak token', app.telegram_error_text(app.TelegramError('x', 401)))
+        self.assertIn('menolak token', app.telegram_error_text(app.TelegramError('x', 404)))
+        self.assertIn('menunggu', app.telegram_error_text(app.TelegramError('x', 429)))
+        network = app.telegram_error_text(app.TelegramError('Read timed out'))
+        self.assertIn('Tidak bisa menghubungi', network)
+        self.assertIn('HTTPS_PROXY', network)
+        self.assertIn('boom', app.telegram_error_text(app.TelegramError('boom', 500)))
+
     def test_status_off_on_putus_and_hapus(self):
         page, state, _ = self.run_command('/telegram')
         self.assertIn('belum dipasangkan', page)
@@ -430,12 +512,33 @@ class CommandTests(BridgeCase):
         page, state, _ = self.run_command('/telegram pair')
         self.assertIn(state['bridge']._pairing['code'], page)
 
-    def test_unsupported_terminals_are_told_so(self):
-        page, state, _ = self.run_command('/telegram setup', live=None)
-        self.assertIn('konsol live', page)
-        self.assertIsNone(state['bridge'])
+    def test_a_terminal_without_the_live_console_can_only_pair(self):
+        self.config.clear()
+        page, state, made = self.run_command('/telegram setup', live=None)
+        self.assertTrue(made[0].pairing_only)
+        self.assertIn('amagi gateway', page)
+        self.assertEqual(self.config['telegram_token'], TOKEN)
+        page, _, _ = self.run_command('/telegram on', live=None)
+        self.assertIn('amagi gateway', page)
         page, _, _ = self.run_command('/telegram nonsense')
         self.assertIn('Pilihan:', page)
+
+    def test_pairing_only_bridge_says_so_and_stops_after_pairing(self):
+        self.bridge.pairing_only = True
+        self.bridge.start()
+        self.assertTrue(self.bridge.ready.wait(3))
+        code = self.bridge.begin_pairing()
+        self.fake.say(f'/pair {code}')
+        self.assertTrue(self.fake.wait_for(lambda: self.config.get('telegram_chat_id') == 555))
+        self.assertTrue(self.fake.wait_for(lambda: any('amagi gateway' in t for t in self.fake.sent(555))))
+        self.assertTrue(self.fake.wait_for(lambda: not self.bridge.running))
+        self.assertTrue(any('amagi gateway' in n for n in self.notices))
+
+    def test_setup_is_refused_while_a_gateway_holds_the_bot(self):
+        with patch.object(app, 'gateway_state', return_value={'pid': 1}):
+            page, state, made = self.run_command('/telegram setup')
+        self.assertIn('Gateway sedang berjalan', page)
+        self.assertEqual(made, [])
 
     def test_the_command_is_listed_and_documented(self):
         self.assertIn('/telegram', [name for name, _ in styling.COMMANDS])
