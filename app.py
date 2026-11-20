@@ -143,11 +143,22 @@ Kamu memiliki akses ke tools komputer lokal pengguna, memori jangka panjang (.md
 }}
 </tool_call>
 
+KHUSUS write_file dan edit_file: JANGAN taruh isi file di dalam JSON (rawan salah escape). Tulis JSON hanya berisi
+filepath (dan replace_all), lalu isi ditulis APA ADANYA, tanpa escape apa pun, di blok sesudah tag penutup:
+<tool_call>
+{{"name": "write_file", "arguments": {{"filepath": "src/app.py"}}}}
+</tool_call>
+<file_content>
+isi file persis seperti yang ingin disimpan
+</file_content>
+Untuk edit_file pakai <old_text>...</old_text> lalu <new_text>...</new_text> (urutan itu, semuanya sesudah </tool_call>).
+Satu jawaban hanya boleh berisi SATU blok <tool_call>.
+
 Daftar tool yang tersedia:
 - list_directory   : Mendaftar file/folder. Args: {{"path": ".", "recursive": false, "depth": 2}}
 - read_file        : Membaca teks file.     Args: {{"filepath": "path/ke/file"}}
-- write_file       : Membuat file baru atau menulis ulang seluruh isi file. Args: {{"filepath": "path", "content": "isi file"}}
-- edit_file        : Mengubah SEBAGIAN file yang sudah ada dengan mengganti teks persis. Args: {{"filepath": "path", "old": "teks lama persis", "new": "teks baru", "replace_all": false}}
+- write_file       : Membuat file baru atau menulis ulang seluruh isi file. Args: {{"filepath": "path"}} + isi di blok <file_content> (lihat aturan di atas)
+- edit_file        : Mengubah SEBAGIAN file yang sudah ada dengan mengganti teks persis. Args: {{"filepath": "path", "replace_all": false}} + blok <old_text> (teks lama persis) dan <new_text> (teks baru)
 - fetch_url       : Membuka halaman web publik dan mengembalikan teksnya (hanya baca; alamat lokal diblokir; pertama kali ke tiap situs pengguna ditanya izin). Args: {{"url": "https://...", "max_chars": 12000}}
 - send_file       : Mengirim file ke chat Telegram pengguna (hanya bila Telegram terhubung; SELALU minta izin; file berisi rahasia ditolak). Args: {{"filepath": "laporan.docx", "caption": "opsional"}}
 - edit_document   : Mengubah dokumen Word (.docx), Excel (.xlsx), atau PowerPoint (.pptx) lewat daftar operasi; preview dan izin dulu, file asli dicadangkan.
@@ -199,14 +210,105 @@ def get_current_system_prompt():
 
 
 # ─── Tool Call Parser ─────────────────────────────────────────────────────────
+RAW_BLOCKS = {"file_content": "content", "old_text": "old", "new_text": "new"}
+RAW_BLOCK_RE = {tag: re.compile(r"<%s>\n?(.*)</%s>" % (tag, tag), re.DOTALL) for tag in RAW_BLOCKS}
+RAW_BLOCK_OPEN_RE = {tag: re.compile(r"<%s>\n?(.*)\Z" % tag, re.DOTALL) for tag in RAW_BLOCKS}
+
+
+def extract_raw_args(content):
+    """Ambil isi mentah dari blok <file_content>/<old_text>/<new_text> (tanpa escape JSON)."""
+    found = {}
+    for tag, key in RAW_BLOCKS.items():
+        if "<" + tag + ">" not in content:
+            continue
+        match = RAW_BLOCK_RE[tag].search(content)
+        if match is None:
+            match = RAW_BLOCK_OPEN_RE[tag].search(content)
+        if match is not None:
+            value = match.group(1)
+            if tag != "file_content" and value.endswith("\n"):
+                value = value[:-1]  # old/new: newline sebelum tag penutup hanyalah pemisah
+            found[key] = value
+    return found
+
+
+def _strip_raw_blocks(content):
+    for tag in RAW_BLOCKS:
+        if "<" + tag + ">" in content:
+            content = RAW_BLOCK_RE[tag].sub("", content)
+            content = RAW_BLOCK_OPEN_RE[tag].sub("", content)
+    return content
+
+
+def merge_raw_args(func_name, args, content):
+    """Gabungkan isi mentah ke args untuk tool penulis file; blok menang atas JSON."""
+    if func_name not in ("write_file", "edit_file") or not isinstance(args, dict):
+        return args
+    merged = dict(args)
+    merged.update(extract_raw_args(content))
+    return merged
+
+
 def extract_tool_call(content):
-    """Ekstrak tool_call XML dari respons AI."""
+    """Ekstrak tool_call XML dari respons AI (toleran tag penutup yang hilang)."""
+    content = _strip_raw_blocks(content)
     match = re.search(r"<tool_call>(.*?)</tool_call>", content, re.DOTALL)
+    if not match:
+        match = re.search(r"<tool_call>(.*)\Z", content, re.DOTALL)
     if match:
         json_str    = match.group(1).strip()
         text_before = content.split("<tool_call>")[0].strip()
         return text_before, json_str
     return content, None
+
+
+def parse_tool_json(raw):
+    """Urai JSON tool call; perbaiki kesalahan umum model (pagar kode, koma
+    berlebih, kurung kurang). Melempar ValueError bila tetap tidak bisa."""
+    text = (raw or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text).strip()
+    start = text.find("{")
+    if start > 0:
+        text = text[start:]
+    candidates = [text]
+    cleaned = re.sub(r",\s*([}\]])", r"\1", text)
+    candidates.append(cleaned)
+    # Hitung kurung di luar string untuk menambal output yang terpotong.
+    depth_obj = depth_arr = 0
+    in_str = esc = False
+    for ch in cleaned:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth_obj += 1
+        elif ch == "}":
+            depth_obj -= 1
+        elif ch == "[":
+            depth_arr += 1
+        elif ch == "]":
+            depth_arr -= 1
+    if not in_str and (depth_obj > 0 or depth_arr > 0):
+        candidates.append(cleaned + "]" * max(depth_arr, 0) + "}" * max(depth_obj, 0))
+    last = ValueError("kosong")
+    for cand in candidates:
+        try:
+            data = json.loads(cand, strict=False)
+        except ValueError as exc:
+            last = exc
+            continue
+        if isinstance(data, dict) and data.get("name"):
+            if not isinstance(data.get("arguments", {}), dict):
+                data["arguments"] = {}
+            return data
+        last = ValueError("tool call harus objek dengan 'name'")
+    raise last
 
 # ─── Render Functions ─────────────────────────────────────────────────────────
 def render_model_selector(current_idx):
@@ -2316,10 +2418,8 @@ def run_print_mode(question, stdin_text=None):
                 sys.stdout.write(text.strip() + "\n")
                 return 0
             try:
-                call = json.loads(call_json)
+                call = parse_tool_json(call_json)
                 name, args = call.get("name", ""), call.get("arguments", {})
-                if not isinstance(args, dict):
-                    args = {}
             except ValueError:
                 return fail("Gagal mengurai tool call dari model.", 1)
             if name in PRINT_MODE_TOOLS:
@@ -2457,6 +2557,7 @@ def _run_session(live=None, gateway=False):
     # ── Telegram (hanya di konsol live) ───────────────────────────────────────
     telegram = {"bridge": None}
     turn_steps = []
+    bad_json_retries = 0
 
     def telegram_notice(text):
         print(f"\n  {COLOR_DIM}✈ {text}{RESET}")
@@ -2854,10 +2955,19 @@ def _run_session(live=None, gateway=False):
 
                 if tool_call_json:
                     try:
-                        tool_call = json.loads(tool_call_json)
+                        tool_call = parse_tool_json(tool_call_json)
                         func_name = tool_call.get("name", "")
-                        args      = tool_call.get("arguments", {})
-                    except Exception:
+                        args      = merge_raw_args(func_name, tool_call.get("arguments", {}), full_content)
+                        bad_json_retries = 0
+                    except Exception as exc:
+                        bad_json_retries += 1
+                        if bad_json_retries <= 2:
+                            messages.append({"role": "user", "content": (
+                                f"[Sistem] Tool call tidak valid ({exc}). Kirim ulang SATU blok "
+                                "<tool_call>{\"name\": ..., \"arguments\": {...}}</tool_call> dengan JSON "
+                                "yang benar: string di-escape (\\n, \\\"), tanpa koma berlebih. Untuk isi file "
+                                "panjang, pecah menjadi beberapa langkah kecil.")})
+                            continue
                         print(f"  {RED}Gagal mengurai tool call JSON.{RESET}\n")
                         break
 

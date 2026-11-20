@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.13
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.14
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,11 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.14 — Tool call lebih tahan banting
+
+- **Tidak lagi berhenti dengan "Gagal mengurai tool call JSON":** parser memperbaiki kerusakan yang umum (pagar ` ```json `, koma berlebih, newline mentah di dalam string, kurung atau tag `</tool_call>` yang hilang karena jawaban terpotong). Bila tetap gagal, model diberi tahu apa salahnya dan diminta mengirim ulang (maksimal 2 kali) sebelum menyerah.
+- **Isi file tanpa escape:** `write_file` dan `edit_file` kini menerima isi mentah di blok `<file_content>`, `<old_text>`, dan `<new_text>` sesudah `</tool_call>`, sehingga file panjang dengan tanda kutip, backslash, atau HTML tidak lagi merusak JSON. Format JSON lama tetap diterima.
 
 ### Baru di v2.12.13 — File lewat Telegram dan membaca halaman web
 
