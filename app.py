@@ -1394,6 +1394,24 @@ class VisibleResponseFilter:
         return ''.join(visible)
 
 
+TRANSIENT_STATUSES = (0, 502, 503, 504)
+STREAM_RETRY_DELAYS = (2, 5)
+
+
+def stream_with_retry(headers, data, model_info=None, notify=None, sleep=time.sleep):
+    """Panggil stream_ai_response dan coba lagi untuk gangguan sementara: jawaban kosong,
+    koneksi putus, atau 502/503/504. Kode lain (401, 429, ...) dikembalikan apa adanya."""
+    status, content = stream_ai_response(headers, data, model_info=model_info)
+    for attempt, delay in enumerate(STREAM_RETRY_DELAYS, 1):
+        if status not in TRANSIENT_STATUSES:
+            break
+        if notify:
+            notify(f"Layanan tidak menjawab, mencoba lagi ({attempt}/{len(STREAM_RETRY_DELAYS)})...")
+        sleep(delay)
+        status, content = stream_ai_response(headers, data, model_info=model_info)
+    return status, content
+
+
 def stream_ai_response(headers, data, model_info=None):
     spinner = Spinner('Menunggu respons...', tip=True)
     response = None
@@ -2899,7 +2917,9 @@ def _run_session(live=None, gateway=False):
                     "reasoning_effort": current_effort,
                 }
 
-                status_code, full_content = stream_ai_response(headers, data, model_info=MODELS[model_idx])
+                status_code, full_content = stream_with_retry(
+                    headers, data, model_info=MODELS[model_idx],
+                    notify=lambda note: print(f"\n  {DIM}{note}{RESET}"))
                 if status_code == 200:
                     note_balance_billing()
                     QUOTA.refresh(config)

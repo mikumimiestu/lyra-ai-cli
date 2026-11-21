@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.14
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.15
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,10 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.15 — Coba ulang otomatis saat layanan tidak menjawab
+
+- **"Layanan selesai tanpa jawaban" tidak lagi langsung berhenti:** bila server menutup aliran tanpa isi, koneksi putus, atau mengembalikan 502/503/504, Lyra mencoba lagi otomatis sampai 2 kali (jeda 2 dan 5 detik) dengan catatan "mencoba lagi (1/2)". Kuota habis (429), login berakhir (401), dan error lain tetap langsung ditampilkan.
 
 ### Baru di v2.12.14 — Tool call lebih tahan banting
 

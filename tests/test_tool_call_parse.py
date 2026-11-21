@@ -1,4 +1,5 @@
 import unittest
+import unittest.mock
 
 import app
 
@@ -65,3 +66,31 @@ class RawBlockTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StreamRetryTests(unittest.TestCase):
+    def run_with(self, results):
+        calls, notes = [], []
+
+        def fake(headers, data, model_info=None):
+            calls.append(1)
+            return results[min(len(calls), len(results)) - 1]
+
+        with unittest.mock.patch.object(app, "stream_ai_response", fake):
+            out = app.stream_with_retry({}, {}, notify=notes.append, sleep=lambda s: None)
+        return out, len(calls), notes
+
+    def test_empty_answer_is_retried_then_succeeds(self):
+        out, calls, notes = self.run_with([(0, "Layanan selesai tanpa jawaban."), (200, "halo")])
+        self.assertEqual(out, (200, "halo"))
+        self.assertEqual((calls, len(notes)), (2, 1))
+
+    def test_gives_up_after_two_retries(self):
+        out, calls, _ = self.run_with([(0, "kosong")])
+        self.assertEqual(out[0], 0)
+        self.assertEqual(calls, 3)
+
+    def test_quota_and_auth_errors_are_not_retried(self):
+        for status in (401, 429, 500):
+            out, calls, notes = self.run_with([(status, "x")])
+            self.assertEqual((out[0], calls, notes), (status, 1, []))
