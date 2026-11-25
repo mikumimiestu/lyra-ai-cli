@@ -875,6 +875,7 @@ COMMANDS = [
     ('/model', 'Pilih model Lyra'),
     ('/reasoning', 'Atur penalaran low / medium'),
     ('/tema', 'Pilih tema terang, gelap, atau otomatis'),
+    ('/proses', 'Lihat atau hentikan proses latar belakang'),
     ('/memory', 'Lihat dan kelola catatan'),
     ('/time', 'Lihat waktu komputer'),
     ('/reminder', 'Kelola pengingat desktop'),
@@ -919,6 +920,8 @@ COMMAND_DETAILS = {
                  'examples': ['/details'], 'notes': ['Riwayat aktivitas maksimal 20, hanya di memori.']},
     '/model': {'usage': '/model', 'desc': 'Membuka menu model Lyra. Pilihan disimpan sebagai default untuk sesi berikutnya. Model yang mendukung penalaran lanjut ke pilihan tingkat penalaran.',
                'examples': ['/model'], 'notes': ['Gerakkan dengan ↑ ↓, Enter memilih, angka langsung memilih, Esc membatalkan.']},
+    '/proses': {'usage': '/proses [stop NAMA]', 'desc': 'Daftar proses latar belakang yang dijalankan Lyra (server dev, watcher) dan menghentikannya. Semua proses otomatis berhenti saat Lyra ditutup.',
+                'aliases': ['/ps'], 'examples': ['/proses', '/proses stop web'], 'notes': ['Log tersimpan di ~/.amagi_procs (hanya bisa dibaca penggunamu).']},
     '/tema': {'usage': '/tema [terang|gelap|otomatis]', 'desc': 'Memilih warna Lyra untuk terminal berlatar terang atau gelap. Otomatis mendeteksi latar terminal; bila salah, pilih manual. Berlaku setelah /restart.',
               'aliases': ['/theme'], 'examples': ['/tema terang', '/tema otomatis'], 'notes': ['Bisa juga lewat variabel LYRA_THEME=light atau dark.']},
     '/reasoning': {'usage': '/reasoning', 'desc': 'Memilih tingkat penalaran: Cepat (low) atau Sedang (medium). Hanya berlaku untuk model yang mendukung penalaran.',
@@ -1446,6 +1449,10 @@ def tool_call_parts(name, arguments):
         'search': ('Cari', 'pattern'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
+        'start_process': ('Proses latar', 'command'),
+        'read_process': ('Baca log', 'name'),
+        'stop_process': ('Hentikan proses', 'name'),
+        'list_processes': ('Daftar proses', None),
         'init_project': ('Buat project', 'project_name'),
         'save_memory': ('Simpan memori', None),
         'read_memory': ('Baca memori', None),
@@ -1975,6 +1982,8 @@ def activity_group(name, arguments):
         return 'Eksplorasi'
     if name in ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template', 'create_directory', 'init_project'):
         return 'Perubahan'
+    if name in ('start_process', 'read_process', 'stop_process', 'list_processes'):
+        return 'Terminal'
     if name == 'execute_command':
         command = str(arguments.get('command', ''))
         return 'Pengujian' if re.search(r'\b(pytest|unittest|vitest|jest)\b|\bnpm (?:run )?test\b', command) else 'Terminal'

@@ -7,6 +7,8 @@ import time
 import re
 import fnmatch
 import shutil
+import atexit
+import signal
 
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
@@ -2012,11 +2014,225 @@ def execute_command(command, timeout=None, cwd=None):
     except subprocess.TimeoutExpired:
         if 'spinner' in locals():
             spinner.stop()
-        return f"Error: Perintah melebihi batas waktu {timeout} detik."
+        return (f"Error: Perintah melebihi batas waktu {timeout} detik. Untuk server atau proses yang berjalan terus "
+                "(npm run dev, flask run, watcher), gunakan start_process.")
     except Exception as e:
         if 'spinner' in locals():
             spinner.stop()
         return f"Error menjalankan perintah: {str(e)}"
+
+# ─── Proses latar belakang ────────────────────────────────────────────────────
+# Server dev, watcher, dan proses lain yang berjalan terus. Keluarannya ke file log (rahasia: hanya pengguna),
+# stdin ditutup, dan semuanya dihentikan saat Lyra keluar. Memulai selalu minta izin seperti execute_command.
+MAX_BACKGROUND = 5
+BACKGROUND = {}                      # nama -> {'proc', 'log', 'command', 'cwd', 'started'}
+_ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)')
+_URL_RE = re.compile(r'https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::\d+)?[^\s"\'<>)]*')
+
+
+def _proc_dir():
+    path = os.environ.get('LYRA_PROC_DIR') or os.path.expanduser('~/.amagi_procs')
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+    return path
+
+
+def _prune_logs(keep=30):
+    try:
+        folder = _proc_dir()
+        logs = sorted((os.path.join(folder, n) for n in os.listdir(folder) if n.endswith('.log')), key=os.path.getmtime)
+        for old in logs[:-keep]:
+            os.remove(old)
+    except OSError:
+        pass
+
+
+def _log_tail(path, lines=40, max_chars=6000):
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 65536))
+            raw = handle.read().decode('utf-8', 'replace')
+    except OSError:
+        return ''
+    raw = _ANSI_RE.sub('', raw).replace('\r\n', '\n')
+    rows = [row.split('\r')[-1] for row in raw.split('\n')]        # bilah progres: ambil keadaan terakhir
+    text = '\n'.join(rows[-lines:]).strip('\n')
+    return text[-max_chars:]
+
+
+def _process_state(info):
+    code = info['proc'].poll()
+    return 'berjalan' if code is None else f'selesai (exit {code})'
+
+
+def _describe_process(name, info, lines=15):
+    tail = _log_tail(info['log'], lines)
+    urls = []
+    for url in _URL_RE.findall(_log_tail(info['log'], 200)):
+        if url not in urls:
+            urls.append(url)
+    head = f"Proses '{name}' (pid {info['proc'].pid}): {_process_state(info)}"
+    parts = [head]
+    if urls:
+        parts.append('Alamat: ' + ', '.join(urls[:3]))
+    parts.append('Log terakhir:\n' + tail if tail else 'Log masih kosong.')
+    return '\n'.join(parts)
+
+
+def _process_name(name, command):
+    base = re.sub(r'[^a-z0-9_-]+', '-', str(name or '').lower()).strip('-')[:32]
+    if not base:
+        words = re.findall(r'[A-Za-z0-9_-]+', str(command or ''))
+        base = (words[0].lower() if words else 'proses')[:24]
+        if len(words) > 1:
+            base = f'{base}-{words[1].lower()}'[:32]
+    candidate, count = base, 2
+    while candidate in BACKGROUND and BACKGROUND[candidate]['proc'].poll() is None:
+        candidate, count = f'{base}-{count}', count + 1
+    return candidate
+
+
+def start_process(command, name=None, cwd=None, wait=3):
+    """Jalankan perintah di latar belakang (server dev, watcher). Kembali setelah beberapa detik dengan status dan log awal."""
+    text = str(command or '').strip()
+    if not text:
+        return "Error: perintah kosong."
+    if PASSWORD_IN_COMMAND_RE.search(text):
+        return "Ditolak: jangan menaruh password di dalam perintah."
+    if command_needs_password(text):
+        return "Perintah yang meminta password tidak bisa dijalankan di latar belakang. Pakai execute_command agar pengguna bisa mengetik passwordnya."
+    if cwd and not os.path.isdir(cwd):
+        return f"Error: folder kerja '{cwd}' tidak ada."
+    if sum(1 for info in BACKGROUND.values() if info['proc'].poll() is None) >= MAX_BACKGROUND:
+        return f"Sudah ada {MAX_BACKGROUND} proses latar yang berjalan. Hentikan salah satu dengan stop_process dulu."
+    process_name = _process_name(name, text)
+    details = {
+        "Perintah": text,
+        "Direktori": cwd or os.getcwd(),
+        "Mode": "latar belakang (jalan terus sampai dihentikan atau Lyra ditutup)",
+        "Nama": process_name,
+    }
+    if not _confirm_permission("Konfirmasi Proses Latar Belakang", details):
+        return "Proses dibatalkan oleh pengguna."
+    try:
+        folder = _proc_dir()
+        log_path = os.path.join(folder, f"{process_name}-{int(time.time())}.log")
+        descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        env = dict(os.environ, GIT_TERMINAL_PROMPT="0", PYTHONUNBUFFERED="1", NO_COLOR="1")
+        options = {}
+        if os.name == 'nt':
+            options['creationflags'] = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        else:
+            options['start_new_session'] = True
+        with os.fdopen(descriptor, 'wb') as log_file:
+            proc = subprocess.Popen(text, shell=True, cwd=cwd, stdin=subprocess.DEVNULL, stdout=log_file,
+                                    stderr=subprocess.STDOUT, env=env, **options)
+    except Exception as error:
+        return f"Error menjalankan proses: {error}"
+    info = {'proc': proc, 'log': log_path, 'command': text, 'cwd': cwd or os.getcwd(), 'started': time.time()}
+    BACKGROUND[process_name] = info
+    _prune_logs()
+    try:
+        limit = max(0.0, min(float(wait), 10.0))
+    except (TypeError, ValueError):
+        limit = 3.0
+    deadline = time.time() + limit
+    while time.time() < deadline and proc.poll() is None:
+        time.sleep(0.2)
+    note = "\nBaca log dengan read_process, hentikan dengan stop_process." if proc.poll() is None else ""
+    return _describe_process(process_name, info) + note
+
+
+def _find_process(name):
+    if name:
+        info = BACKGROUND.get(str(name))
+        if info:
+            return str(name), info, None
+        known = ', '.join(BACKGROUND) or '(belum ada)'
+        return None, None, f"Tidak ada proses bernama '{name}'. Proses yang dikenal: {known}."
+    running = [(n, i) for n, i in BACKGROUND.items() if i['proc'].poll() is None]
+    if len(running) == 1:
+        return running[0][0], running[0][1], None
+    if len(BACKGROUND) == 1:
+        only = next(iter(BACKGROUND.items()))
+        return only[0], only[1], None
+    return None, None, "Sebutkan nama prosesnya. Proses yang dikenal: " + (', '.join(BACKGROUND) or '(belum ada)') + "."
+
+
+def read_process(name=None, lines=40):
+    """Lihat status dan log terakhir sebuah proses latar."""
+    process_name, info, problem = _find_process(name)
+    if problem:
+        return problem
+    try:
+        count = max(1, min(int(lines), 200))
+    except (TypeError, ValueError):
+        count = 40
+    return _describe_process(process_name, info, count)
+
+
+def list_processes():
+    if not BACKGROUND:
+        return "Tidak ada proses latar belakang."
+    rows = []
+    for process_name, info in BACKGROUND.items():
+        age = int(time.time() - info['started'])
+        rows.append(f"{process_name} · pid {info['proc'].pid} · {_process_state(info)} · {age}d · {info['command'][:80]}")
+    return "\n".join(rows)
+
+
+def _kill_tree(proc, grace=5.0):
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/T', '/F', '/PID', str(proc.pid)], capture_output=True, timeout=15)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except Exception:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    deadline = time.time() + grace
+    while time.time() < deadline and proc.poll() is None:
+        time.sleep(0.1)
+    if proc.poll() is None:
+        try:
+            if os.name == 'nt':
+                proc.kill()
+            else:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def stop_process(name=None):
+    """Hentikan proses latar beserta seluruh anak prosesnya."""
+    process_name, info, problem = _find_process(name)
+    if problem:
+        return problem
+    if info['proc'].poll() is not None:
+        return f"Proses '{process_name}' sudah selesai (exit {info['proc'].poll()}).\n" + _log_tail(info['log'], 10)
+    _kill_tree(info['proc'])
+    return f"Proses '{process_name}' dihentikan (exit {info['proc'].poll()}).\nLog terakhir:\n" + _log_tail(info['log'], 10)
+
+
+def stop_all_processes():
+    """Dipanggil saat Lyra keluar: tidak ada server yang tertinggal."""
+    for info in list(BACKGROUND.values()):
+        _kill_tree(info['proc'], grace=2.0)
+
+
+atexit.register(stop_all_processes)
 
 # ─── Project scaffolding ──────────────────────────────────────────────────────
 # Each project type is a short plan: optional files written by Lyra, plus commands run WITHOUT a shell

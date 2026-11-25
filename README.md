@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.18
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.19
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,12 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.19 — Proses latar belakang
+
+- **Server dev tidak lagi membuat Lyra menggantung:** tool baru `start_process`, `read_process`, `stop_process`, dan `list_processes` menjalankan `npm run dev`, `flask run`, watcher, dan sejenisnya di latar belakang. Memulai proses meminta izin seperti perintah terminal; setelah beberapa detik Lyra melaporkan status, alamat server (URL), dan log awal, lalu bisa membaca log untuk mencari error dan menghentikan proses bila selesai. Penghentian mematikan seluruh pohon proses, maksimal 5 proses sekaligus, dan semuanya otomatis berhenti saat Lyra ditutup.
+- **`/proses`** menampilkan daftar proses latar dan `/proses stop NAMA` menghentikannya. Log tersimpan di `~/.amagi_procs` (hanya bisa dibaca penggunamu, 30 terbaru); variabel `LYRA_PROC_DIR` mengubah foldernya.
+- Perintah yang meminta password (`sudo`, `ssh`) ditolak di latar belakang; jalankan lewat terminal biasa. Bila `execute_command` kena batas waktu, pesannya kini menyarankan `start_process`. Belum diuji di Windows (memakai `taskkill`).
 
 ### Baru di v2.12.18 — Judul terbaca di semua tema dan teks miring bertingkat
 
