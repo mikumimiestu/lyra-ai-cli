@@ -50,6 +50,57 @@ function Update-SessionPath {
     $env:PATH = "$machine;$user"
 }
 
+# Menjalankan perintah native tanpa mematikan skrip hanya karena ada tulisan di stderr
+# (PowerShell 5.1 + ErrorActionPreference=Stop menganggap stderr sebagai error fatal).
+function Invoke-Quiet([string]$Exe, [string[]]$CmdArgs) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $null = & $Exe @CmdArgs 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+function New-Venv([string]$Exe, [string[]]$Prefix, [string]$Path) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Exe @Prefix -m venv $Path 2>&1 | Out-Null
+    } catch {
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+# Jalur pendek 8.3 (tanpa spasi), mis. C:\Users\LENOVO~1\...; jalur asli bila tidak tersedia.
+function Get-ShortPath([string]$Path) {
+    try {
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        return $fso.GetFile($Path).ShortPath
+    } catch {
+        return $Path
+    }
+}
+
+# Lokasi asli python.exe untuk perintah yang ditemukan ("py" tidak bisa dipakai langsung).
+function Resolve-PythonExe {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $out = & $pythonCmd @pythonArgs -c "import sys; print(sys.executable)" 2>$null
+        $path = ("$out").Trim()
+        if ($path -and (Test-Path $path)) { return $path }
+    } catch {
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    return $null
+}
+
 function Confirm-PythonInstall {
     if ($env:AMAGI_ASSUME_YES -eq "1") { return $true }
     try {
@@ -179,18 +230,46 @@ if ($LOCAL_MODE) {
 Write-Host "Setting up virtual environment..." -ForegroundColor Cyan
 $venvPath = Join-Path $INSTALL_DIR "venv"
 $pythonVenv = Join-Path $venvPath "Scripts\python.exe"
+$pythonExe = Resolve-PythonExe
+$useVenv = $false
 
 if (!(Test-Path $pythonVenv)) {
-    & $pythonCmd @pythonArgs -m venv $venvPath
+    New-Venv $pythonCmd $pythonArgs $venvPath
+}
+if ((Test-Path $pythonVenv) -and (Invoke-Quiet $pythonVenv @("-c", "import sys"))) {
+    $useVenv = $true
+} elseif ($pythonExe) {
+    # Python di folder berspasi (mis. nama pengguna "LENOVO LEGION") membuat launcher venv gagal:
+    # "Unable to create process using ...". Coba lagi lewat jalur pendek tanpa spasi.
+    Write-Host "Venv tidak bisa dijalankan (biasanya karena spasi pada jalur Python). Mencoba jalur pendek..." -ForegroundColor Yellow
+    Remove-Item $venvPath -Recurse -Force -ErrorAction SilentlyContinue
+    $shortExe = Get-ShortPath $pythonExe
+    if ($shortExe -ne $pythonExe) {
+        New-Venv $shortExe @() $venvPath
+        if ((Test-Path $pythonVenv) -and (Invoke-Quiet $pythonVenv @("-c", "import sys"))) { $useVenv = $true }
+    }
 }
 
-Write-Host "Installing dependencies (requests, prompt_toolkit)..." -ForegroundColor Cyan
-if (Test-Path $pythonVenv) {
-    & $pythonVenv -m ensurepip --default-pip 2>$null | Out-Null
-    & $pythonVenv -m pip install requests 'prompt_toolkit>=3.0.36,<4' --quiet
+$depSpecs = @("requests", "prompt_toolkit>=3.0.36,<4")
+$pathLine = ""
+if ($useVenv) {
+    Write-Host "Installing dependencies (requests, prompt_toolkit)..." -ForegroundColor Cyan
+    $null = Invoke-Quiet $pythonVenv @("-m", "ensurepip", "--default-pip")
+    if (-not (Invoke-Quiet $pythonVenv (@("-m", "pip", "install", "--quiet") + $depSpecs))) {
+        Write-Host "Gagal memasang dependensi (requests, prompt_toolkit). Periksa koneksi internet lalu coba lagi." -ForegroundColor Red
+        exit 1
+    }
+    $runner = $pythonVenv
 } else {
-    $pythonVenv = $pythonCmd
-    & $pythonCmd @pythonArgs -m pip install requests 'prompt_toolkit>=3.0.36,<4' --quiet
+    Write-Host "Venv tidak bisa dipakai di komputer ini; memasang dependensi langsung ke folder Amagi..." -ForegroundColor Yellow
+    Remove-Item $venvPath -Recurse -Force -ErrorAction SilentlyContinue
+    $libDir = Join-Path $INSTALL_DIR "lib"
+    if (-not (Invoke-Quiet $pythonCmd (@($pythonArgs) + @("-m", "pip", "install", "--quiet", "--upgrade", "--target", $libDir) + $depSpecs))) {
+        Write-Host "Gagal memasang dependensi (requests, prompt_toolkit). Periksa koneksi internet lalu coba lagi." -ForegroundColor Red
+        exit 1
+    }
+    $runner = if ($pythonExe) { $pythonExe } else { $pythonCmd }
+    $pathLine = "set ""PYTHONPATH=$libDir;%PYTHONPATH%""`r`n"
 }
 
 # 5. Create amagi.cmd wrapper in User Bin directory
@@ -200,12 +279,14 @@ if (!(Test-Path $BIN_DIR)) {
 }
 
 $cmdWrapperPath = Join-Path $BIN_DIR "amagi.cmd"
-$wrapperContent = "@echo off`r`n""$pythonVenv"" ""$INSTALL_DIR\app.py"" %*"
+$wrapperContent = "@echo off`r`n$pathLine""$runner"" ""$INSTALL_DIR\app.py"" %*"
 Set-Content -Path $cmdWrapperPath -Value $wrapperContent -Encoding ASCII
 
 # Also place amagi.bat in venv\Scripts for direct PATH access
-$batWrapperPath = Join-Path $venvPath "Scripts\amagi.bat"
-Set-Content -Path $batWrapperPath -Value $wrapperContent -Encoding ASCII
+if ($useVenv) {
+    $batWrapperPath = Join-Path $venvPath "Scripts\amagi.bat"
+    Set-Content -Path $batWrapperPath -Value $wrapperContent -Encoding ASCII
+}
 
 # 6. Add BIN_DIR to User PATH Environment Variable if not already present
 $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")

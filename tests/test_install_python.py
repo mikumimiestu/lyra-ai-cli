@@ -172,8 +172,19 @@ class InstallPs1Tests(unittest.TestCase):
         self.assertIn('Update-SessionPath', self.text)
 
     def test_py_launcher_gets_its_flag_when_used_for_venv(self):
-        self.assertIn('@pythonArgs -m venv', self.text)
+        self.assertIn('New-Venv $pythonCmd $pythonArgs', self.text)
+        self.assertIn('@Prefix -m venv', self.text)
         self.assertIn('@("-3")', self.text)
+
+    def test_a_python_path_with_spaces_does_not_break_the_install(self):
+        # Windows venv launcher bug: "Unable to create process using ...Python310\python.exe" when the path has a space.
+        self.assertIn('function Invoke-Quiet', self.text)
+        self.assertIn('Scripting.FileSystemObject', self.text)         # 8.3 short path retry
+        self.assertIn('$useVenv', self.text)
+        self.assertIn('--target', self.text)                           # last resort: no venv
+        self.assertIn('PYTHONPATH', self.text)
+        self.assertNotIn('ensurepip --default-pip 2>$null', self.text)  # stderr + Stop = fatal on PowerShell 5.1
+        self.assertIn('if ($useVenv) {\n    $batWrapperPath', self.text)
 
     def test_braces_and_parentheses_balance(self):
         code = re.sub(r'"(?:`.|[^"`])*"|\'[^\']*\'', '', self.text)

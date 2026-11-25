@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.15
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.16
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,10 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.16 — Installer Windows tahan nama pengguna berspasi
+
+- **Perbaikan "Unable to create process using ...python.exe -m ensurepip":** di Windows dengan nama pengguna berspasi (misalnya `C:\Users\LENOVO LEGION`), launcher venv Python 3.10 gagal, dan PowerShell 5.1 menganggap tulisan di stderr sebagai error fatal sehingga instalasi berhenti. Installer sekarang menjalankan perintah Python tanpa berhenti karena stderr, menguji venv setelah dibuat, mencoba ulang lewat jalur pendek 8.3 (tanpa spasi), dan sebagai pilihan terakhir memasang `requests` dan `prompt_toolkit` ke `~\.amagi-cli\lib` tanpa venv (`PYTHONPATH` hanya diatur di dalam `amagi.cmd`). Instalasi yang sudah rusak diperbaiki otomatis saat perintah instalasi dijalankan lagi. Jalur cadangan ini belum pernah dijalankan di Windows sungguhan.
 
 ### Baru di v2.12.15 — Coba ulang otomatis saat layanan tidak menjawab
 
