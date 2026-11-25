@@ -17,6 +17,8 @@ from vtscreen import Screen
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import tempfile
 SESSIONS_FOR_TESTS = tempfile.mkdtemp(prefix='lyra-pty-sessions-')
+os.environ.setdefault('LYRA_NO_THEME_QUERY', '1')   # the fake terminal never answers the background-colour query
+os.environ.setdefault('LYRA_THEME', 'dark')
 os.environ.setdefault('LYRA_GATEWAY_DIR', tempfile.mkdtemp(prefix='lyra-pty-gateway-'))   # a gateway running on this computer must not affect tests
 
 

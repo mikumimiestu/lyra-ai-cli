@@ -45,6 +45,19 @@ DANGEROUS_COMMAND_PATTERNS = [re.compile(pattern, re.IGNORECASE) for pattern in 
 )]
 
 
+# Perintah yang memang meminta password. Passwordnya diketik pengguna sendiri di terminal; Lyra tidak pernah melihatnya.
+_COMMAND_START = r'(?:^|[;&|(]|&&)\s*(?:\w+=\S+\s+)*'
+PASSWORD_COMMAND_RE = re.compile(_COMMAND_START + r'(?:sudo|doas|su|ssh|scp|sftp|passwd|kinit)(?=\s|$)', re.IGNORECASE)
+CREDENTIAL_COMMAND_RE = re.compile(r'\bgit\s+(?:push|pull|fetch|clone)\b|\b(?:docker|npm|gh|az|gcloud|heroku)\s+(?:auth\s+)?login\b',
+                                   re.IGNORECASE)
+# Menaruh password di dalam perintah (riwayat shell, log, model) tidak diizinkan.
+PASSWORD_IN_COMMAND_RE = re.compile(r'\bsudo\s+(?:-\S*S\S*|--stdin)\b|\|\s*(?:sudo|su)\b|\bsshpass\b', re.IGNORECASE)
+
+
+def command_needs_password(command):
+    return bool(PASSWORD_COMMAND_RE.search(str(command or '')))
+
+
 def is_dangerous_command(command):
     return any(pattern.search(str(command or '')) for pattern in DANGEROUS_COMMAND_PATTERNS)
 
@@ -1930,9 +1943,25 @@ def execute_command(command, timeout=None, cwd=None):
     """
     Menjalankan perintah terminal hanya jika diizinkan pengguna.
     Semua log eksekusi internal disembunyikan.
+
+    Perintah yang meminta password (sudo, ssh, ...) dijalankan dengan tampilan live ditangguhkan supaya
+    kotak "Password:" muncul dan pengguna mengetiknya sendiri; Lyra tidak membaca password itu.
     """
+    import styling
+
     if timeout is None:
         timeout = DEFAULT_TIMEOUT
+
+    text = str(command or '')
+    if PASSWORD_IN_COMMAND_RE.search(text):
+        return ("Ditolak: jangan menaruh password di dalam perintah (sudo -S, echo ... | sudo, sshpass). "
+                "Jalankan perintahnya biasa; password diketik pengguna sendiri di terminal.")
+    needs_password = command_needs_password(text)
+    can_type = REMOTE_APPROVER is None and sys.stdin.isatty() and sys.stdout.isatty()
+    if needs_password and not can_type:
+        return ("Perintah ini meminta password yang harus diketik langsung di terminal komputer, jadi tidak bisa "
+                f"dijalankan dari sini (Telegram atau mode tanpa layar). Minta pengguna menjalankannya sendiri: {text}")
+    terminal_mode = can_type and (needs_password or bool(CREDENTIAL_COMMAND_RE.search(text)))
 
     try:
         details = {
@@ -1940,23 +1969,31 @@ def execute_command(command, timeout=None, cwd=None):
             "Direktori": cwd or os.getcwd(),
             "Timeout": f"{timeout} detik"
         }
+        if needs_password:
+            details["Catatan"] = "Perintah ini meminta password. Ketik langsung di terminal; Lyra tidak melihatnya."
         if not _confirm_permission("Konfirmasi Eksekusi Perintah", details):
             return "Eksekusi perintah dibatalkan oleh pengguna."
 
-        spinner = Spinner("Menjalankan perintah...")
-        spinner.start()
+        def run():
+            if terminal_mode:
+                if needs_password:
+                    print(f"\n  {COLOR_DIM}Jika diminta, ketik password di sini. Lyra tidak melihatnya.{RESET}")
+                return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+            # Tanpa terminal: stdin ditutup dan git tidak bertanya, jadi perintah gagal cepat, tidak menggantung.
+            env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+            return subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout, cwd=cwd,
+                                  stdin=subprocess.DEVNULL, env=env)
 
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=cwd,
-            )
-        finally:
-            spinner.stop()
+        if terminal_mode:
+            runner = styling.TERMINAL_RUNNER
+            result = runner(run) if runner is not None else run()
+        else:
+            spinner = Spinner("Menjalankan perintah...")
+            spinner.start()
+            try:
+                result = run()
+            finally:
+                spinner.stop()
 
         output_parts = [f"Exit Code: {result.returncode}"]
         if result.stdout:

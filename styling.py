@@ -8,18 +8,93 @@ if sys.platform == "win32":
     os.system("")
 
 # ─── Terminal Color Detection ─────────────────────────────────────────────────
+def _luminance(red, green, blue):
+    return (0.299 * red + 0.587 * green + 0.114 * blue) / 255
+
+
+def _parse_osc11(reply):
+    """'rgb:ffff/ffff/ffff' (atau 'rgb:ff/ff/ff') -> kecerahan 0..1, atau None."""
+    match = re.search(r'rgb:([0-9a-fA-F]+)/([0-9a-fA-F]+)/([0-9a-fA-F]+)', reply or '')
+    if not match:
+        return None
+    parts = [int(group, 16) / (16 ** len(group) - 1) for group in match.groups()]
+    return _luminance(*(value * 255 for value in parts))
+
+
+def _query_terminal_background(timeout=0.25):
+    """Tanya terminal warna latarnya (OSC 11). None bila tidak dijawab atau bukan terminal POSIX."""
+    if os.name != 'posix' or os.environ.get('LYRA_NO_THEME_QUERY') == '1':
+        return None
+    try:
+        import select
+        import termios
+        import time
+        import tty
+        if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get('TERM') == 'dumb':
+            return None
+        fd = sys.stdin.fileno()
+        saved = termios.tcgetattr(fd)
+    except Exception:
+        return None
+    reply = ''
+    try:
+        tty.setcbreak(fd)
+        sys.stdout.write('\033]11;?\033\\')
+        sys.stdout.flush()
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            ready, _, _ = select.select([fd], [], [], max(0.0, deadline - time.time()))
+            if not ready:
+                break
+            reply += os.read(fd, 128).decode('latin-1')
+            if '\007' in reply or '\033\\' in reply:
+                break
+    except Exception:
+        return None
+    finally:
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        except Exception:
+            pass
+    return _parse_osc11(reply)
+
+
+def _saved_theme():
+    try:
+        import json
+        with open(os.path.expanduser("~/.amagi_cli_config.json"), 'r', encoding='utf-8') as handle:
+            return str(json.load(handle).get('theme', '')).lower()
+    except Exception:
+        return ''
+
+
 def _detect_dark_bg():
     """
-    Heuristic: jika COLORFDBG/COLORFG/TERM_PROGRAM menunjukkan light,
-    gunakan warna gelap agar tetap terbaca. Default: anggap dark.
+    Urutan: LYRA_THEME (light/dark) -> LYRA_LIGHT_THEME -> pilihan tersimpan (/tema)
+    -> COLORFGBG -> tanya terminal (OSC 11) -> anggap gelap.
     """
-    term_program = os.environ.get("TERM_PROGRAM", "").lower()
-    color_term   = os.environ.get("COLORTERM", "").lower()
-    # macOS Terminal kadang punya TERM_PROGRAM=Apple_Terminal dengan bg terang
-    # Jika pengguna set env var ini kita hormati
-    force_light  = os.environ.get("LYRA_LIGHT_THEME", "").lower() in ("1", "true", "yes")
-    if force_light:
+    forced = os.environ.get("LYRA_THEME", "").lower()
+    if forced in ("light", "terang"):
         return False
+    if forced in ("dark", "gelap"):
+        return True
+    if os.environ.get("LYRA_LIGHT_THEME", "").lower() in ("1", "true", "yes"):
+        return False
+    saved = _saved_theme()
+    if saved in ("light", "terang"):
+        return False
+    if saved in ("dark", "gelap"):
+        return True
+    colorfgbg = os.environ.get("COLORFGBG", "")
+    if colorfgbg:
+        try:
+            background = int(colorfgbg.replace(',', ';').split(';')[-1])
+            return not (background == 7 or 9 <= background <= 15)
+        except ValueError:
+            pass
+    brightness = _query_terminal_background()
+    if brightness is not None:
+        return brightness < 0.5
     return True  # default: dark background
 
 IS_DARK = _detect_dark_bg()
@@ -794,6 +869,7 @@ COMMANDS = [
     ('/details', 'Buka detail aktivitas terakhir'),
     ('/model', 'Pilih model Lyra'),
     ('/reasoning', 'Atur penalaran low / medium'),
+    ('/tema', 'Pilih tema terang, gelap, atau otomatis'),
     ('/memory', 'Lihat dan kelola catatan'),
     ('/time', 'Lihat waktu komputer'),
     ('/reminder', 'Kelola pengingat desktop'),
@@ -838,6 +914,8 @@ COMMAND_DETAILS = {
                  'examples': ['/details'], 'notes': ['Riwayat aktivitas maksimal 20, hanya di memori.']},
     '/model': {'usage': '/model', 'desc': 'Membuka menu model Lyra. Pilihan disimpan sebagai default untuk sesi berikutnya. Model yang mendukung penalaran lanjut ke pilihan tingkat penalaran.',
                'examples': ['/model'], 'notes': ['Gerakkan dengan ↑ ↓, Enter memilih, angka langsung memilih, Esc membatalkan.']},
+    '/tema': {'usage': '/tema [terang|gelap|otomatis]', 'desc': 'Memilih warna Lyra untuk terminal berlatar terang atau gelap. Otomatis mendeteksi latar terminal; bila salah, pilih manual. Berlaku setelah /restart.',
+              'aliases': ['/theme'], 'examples': ['/tema terang', '/tema otomatis'], 'notes': ['Bisa juga lewat variabel LYRA_THEME=light atau dark.']},
     '/reasoning': {'usage': '/reasoning', 'desc': 'Memilih tingkat penalaran: Cepat (low) atau Sedang (medium). Hanya berlaku untuk model yang mendukung penalaran.',
                    'aliases': ['/effort'], 'examples': ['/reasoning'], 'notes': ['Tersimpan sebagai default.']},
     '/memory': {'usage': '/memory', 'desc': 'Membaca, menambah, atau menghapus catatan jangka panjang di ~/.amagi_memory.md. Isinya ikut dibaca Lyra pada setiap pesan.',
@@ -1327,6 +1405,7 @@ def _panel(lines, title='', input_stream=None, output_stream=None, force=False):
 
 
 BAND_BG = rgb_bg(48, 48, 54) if IS_DARK else rgb_bg(228, 228, 234)
+BAND_FG = rgb_to_ansi(*((236, 236, 241) if IS_DARK else (30, 30, 40)))   # terang di pita gelap, gelap di pita terang
 
 
 def render_user_band(text, max_rows=12):
@@ -1342,9 +1421,9 @@ def render_user_band(text, max_rows=12):
         rows = rows[:max_rows - 1] + [f'… +{hidden + 1} baris']
     print()
     for index, row in enumerate(rows):
-        lead = f'{BOLD}{COLOR_LYRA}{marker}{RESET}{BAND_BG}' if index == 0 else ' '
+        lead = f'{BOLD}{COLOR_LYRA}{marker}{RESET}{BAND_BG}{BAND_FG}' if index == 0 else ' '
         pad = ' ' * max(0, room - str_width(row))
-        print(f'{BAND_BG} {lead} {row}{pad}{RESET}')
+        print(f'{BAND_BG}{BAND_FG} {lead} {row}{pad}{RESET}')
 
 
 def tool_call_parts(name, arguments):

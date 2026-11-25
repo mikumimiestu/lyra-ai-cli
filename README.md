@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.16
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.17
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,12 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.17 — Tema terang dan perintah yang meminta password
+
+- **Tema terang:** Lyra kini mendeteksi warna latar terminal (variabel `LYRA_THEME`, pilihan tersimpan, `COLORFGBG`, lalu pertanyaan ke terminal lewat OSC 11) dan tidak lagi selalu menganggap terminal gelap. Teks di pita input punya warna eksplisit sehingga tetap terbaca di terminal terang. Perintah baru `/tema terang|gelap|otomatis` menyimpan pilihanmu (berlaku setelah `/restart`); juga bisa lewat `LYRA_THEME=light` atau `dark`. Pada terminal yang tidak menjawab pertanyaan warna, tema dianggap gelap sampai kamu memilih `/tema terang`.
+- **Perintah yang meminta password:** `sudo`, `su`, `doas`, `ssh`, `scp`, `sftp`, `passwd`, dan `kinit` dijalankan dengan tampilan live ditangguhkan, sehingga kotak "Password:" muncul dan kamu mengetiknya sendiri; Lyra tidak membacanya. Password di dalam perintah (`sudo -S`, `echo ... | sudo`, `sshpass`) ditolak. Dari Telegram atau mode tanpa layar, perintah berpassword tidak dijalankan dan kamu diminta menjalankannya sendiri.
+- **Perintah biasa tidak lagi menggantung:** stdin ditutup dan `git` tidak bertanya username/password, jadi perintah yang menunggu input gagal cepat. `git push/pull/fetch/clone` dan `docker/npm/gh login` memakai terminal asli sehingga tetap bisa meminta login. Alur password belum diuji dengan `sudo` sungguhan di konsol live.
 
 ### Baru di v2.12.16 — Installer Windows tahan nama pengguna berspasi
 

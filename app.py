@@ -143,6 +143,11 @@ Kamu memiliki akses ke tools komputer lokal pengguna, memori jangka panjang (.md
 }}
 </tool_call>
 
+PERINTAH YANG MEMINTA PASSWORD (sudo, ssh, passwd, dan sejenisnya): jalankan saja lewat execute_command; kotak
+"Password:" muncul di terminal dan pengguna mengetiknya sendiri. JANGAN meminta password pengguna di chat dan
+JANGAN menaruhnya di perintah (sudo -S, echo ... | sudo, sshpass); itu ditolak. Dari Telegram perintah seperti itu
+tidak bisa dijalankan, jadi minta pengguna menjalankannya sendiri di komputer.
+
 KHUSUS write_file dan edit_file: JANGAN taruh isi file di dalam JSON (rawan salah escape). Tulis JSON hanya berisi
 filepath (dan replace_all), lalu isi ditulis APA ADANYA, tanpa escape apa pun, di blok sesudah tag penutup:
 <tool_call>
@@ -502,6 +507,26 @@ def restart_application():
         os.execv(sys.executable, [sys.executable] + sys.argv)
     except OSError as error:
         print(f"  {RED}Gagal memulai ulang: {error}. Jalankan 'amagi' lagi secara manual.{RESET}\n")
+
+def handle_theme_command(config, choice=""):
+    """/tema [terang|gelap|otomatis]: simpan pilihan tema (berlaku setelah /restart)."""
+    from styling import IS_DARK
+    choice = (choice or "").strip().lower()
+    names = {"terang": "light", "light": "light", "gelap": "dark", "dark": "dark"}
+    if choice in ("otomatis", "auto"):
+        config.pop("theme", None)
+        save_config(config)
+        return "Tema: otomatis (mendeteksi latar terminal). Jalankan /restart agar berlaku."
+    if choice in names:
+        config["theme"] = names[choice]
+        save_config(config)
+        label = "terang" if names[choice] == "light" else "gelap"
+        return f"Tema disimpan: {label}. Jalankan /restart agar berlaku."
+    saved = {"light": "terang", "dark": "gelap"}.get(str(config.get("theme", "")).lower(), "otomatis")
+    now = "gelap" if IS_DARK else "terang"
+    return (f"Tema sekarang: {now} (pilihan: {saved}). Ganti dengan /tema terang, /tema gelap, "
+            "atau /tema otomatis. Terminal berlatar putih tapi tampil gelap? Pilih /tema terang.")
+
 
 def info_panel(title, show, *args):
     """Run a printing handler and show its output in a panel that disappears when closed.
@@ -2788,6 +2813,10 @@ def _run_session(live=None, gateway=False):
 
             elif user_input.lower() in ("/reasoning", "/effort"):
                 reasoning_effort = handle_reasoning_command(config)
+                continue
+
+            elif user_input.lower().split()[0] in ("/tema", "/theme"):
+                print(f"\n  {handle_theme_command(config, user_input.split(maxsplit=1)[1] if len(user_input.split()) > 1 else '')}\n")
                 continue
 
             elif user_input.lower() in ("/memory", "/mem"):
