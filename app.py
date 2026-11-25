@@ -510,7 +510,7 @@ def restart_application():
 
 def handle_theme_command(config, choice=""):
     """/tema [terang|gelap|otomatis]: simpan pilihan tema (berlaku setelah /restart)."""
-    from styling import IS_DARK
+    from styling import IS_DARK, THEME_REASON
     choice = (choice or "").strip().lower()
     names = {"terang": "light", "light": "light", "gelap": "dark", "dark": "dark"}
     if choice in ("otomatis", "auto"):
@@ -524,8 +524,9 @@ def handle_theme_command(config, choice=""):
         return f"Tema disimpan: {label}. Jalankan /restart agar berlaku."
     saved = {"light": "terang", "dark": "gelap"}.get(str(config.get("theme", "")).lower(), "otomatis")
     now = "gelap" if IS_DARK else "terang"
-    return (f"Tema sekarang: {now} (pilihan: {saved}). Ganti dengan /tema terang, /tema gelap, "
-            "atau /tema otomatis. Terminal berlatar putih tapi tampil gelap? Pilih /tema terang.")
+    return (f"Tema sekarang: {now} (terdeteksi dari: {THEME_REASON}; pilihan tersimpan: {saved}). "
+            "Ganti dengan /tema terang, /tema gelap, atau /tema otomatis. Warna tidak cocok dengan terminalmu? "
+            "Pilih sesuai warna latar terminal, lalu /restart.")
 
 
 def info_panel(title, show, *args):

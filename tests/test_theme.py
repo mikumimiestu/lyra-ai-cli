@@ -33,9 +33,14 @@ class ThemeDetectionTests(unittest.TestCase):
         self.assertFalse(self.detect({'COLORFGBG': '0;default;15'}))
         self.assertTrue(self.detect({'COLORFGBG': '15;0'}))
 
-    def test_terminal_answer_is_used_last(self):
+    def test_terminal_answer_beats_colorfgbg(self):
         self.assertFalse(self.detect({}, queried=0.95))
         self.assertTrue(self.detect({}, queried=0.1))
+        self.assertTrue(self.detect({'COLORFGBG': '0;15'}, queried=0.1))     # COLORFGBG bisa usang; jawaban terminal menang
+
+    def test_reason_is_reported(self):
+        with patch.dict(os.environ, {'LYRA_THEME': 'light'}):
+            self.assertEqual(styling._detect_theme(), (False, 'LYRA_THEME=light'))
 
     def test_parse_osc11(self):
         self.assertAlmostEqual(styling._parse_osc11('\x1b]11;rgb:ffff/ffff/ffff\x1b\\'), 1.0, places=2)
@@ -64,6 +69,22 @@ class ThemeCommandTests(unittest.TestCase):
         message, config, saved = self.run_command('')
         self.assertIn('Tema sekarang', message)
         self.assertEqual(saved, [])
+
+
+class MarkdownNestingTests(unittest.TestCase):
+    def render(self, text):
+        names = {'BOLD': '<B>', 'WHITE': '', 'RESET': '</>', 'ITALIC': '<I>', 'ITALIC_OFF': '</I>'}
+        with patch.multiple(styling, **names):
+            return styling.format_inline_markdown(text)
+
+    def test_italic_inside_bold_leaves_no_stray_asterisks(self):
+        self.assertEqual(self.render('**tebal ⬅️ *miring***'), '<B>tebal ⬅️ <I>miring</I></>')
+        self.assertEqual(self.render('**a *b* c** d'), '<B>a <I>b</I> c</> d')
+        self.assertEqual(self.render('***semua***'), '<B><I>semua</I></>')
+
+    def test_plain_stars_are_left_alone(self):
+        self.assertEqual(self.render('2 * 3 dan 4*5*6'), '2 * 3 dan 4*5*6')
+        self.assertEqual(self.render('*a* dan *b*'), '<I>a</I> dan <I>b</I>')
 
 
 class BandContrastTests(unittest.TestCase):

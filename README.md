@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.17
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.18
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,12 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.18 — Judul terbaca di semua tema dan teks miring bertingkat
+
+- **Judul dan teks redup terbaca di terminal gelap maupun terang:** judul heading dan kotak kini memakai warna teks bawaan terminal, dan warna redup disamakan ke abu-abu menengah, sehingga tidak lagi hampir tak terlihat bila deteksi tema meleset.
+- **Deteksi tema lebih tepat:** jawaban warna latar dari terminal (OSC 11) didahulukan sebelum `COLORFGBG`, yang bisa usang. `/tema` kini menampilkan dari mana tema terdeteksi (mis. "terdeteksi dari: COLORFGBG=0;15"); bila tidak cocok dengan terminalmu, pilih `/tema terang` atau `/tema gelap`, lalu `/restart`.
+- **Markdown bertingkat:** `**tebal *miring***` tidak lagi menyisakan tanda `*` di layar, dan perkalian seperti `2 * 3` tidak dianggap teks miring.
 
 ### Baru di v2.12.17 — Tema terang dan perintah yang meminta password
 

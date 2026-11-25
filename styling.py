@@ -68,36 +68,40 @@ def _saved_theme():
         return ''
 
 
-def _detect_dark_bg():
+def _detect_theme():
     """
-    Urutan: LYRA_THEME (light/dark) -> LYRA_LIGHT_THEME -> pilihan tersimpan (/tema)
-    -> COLORFGBG -> tanya terminal (OSC 11) -> anggap gelap.
+    Mengembalikan (gelap?, alasan). Urutan: LYRA_THEME (light/dark) -> LYRA_LIGHT_THEME -> pilihan tersimpan (/tema)
+    -> jawaban terminal (OSC 11) -> COLORFGBG -> anggap gelap.
     """
     forced = os.environ.get("LYRA_THEME", "").lower()
     if forced in ("light", "terang"):
-        return False
+        return False, "LYRA_THEME=light"
     if forced in ("dark", "gelap"):
-        return True
+        return True, "LYRA_THEME=dark"
     if os.environ.get("LYRA_LIGHT_THEME", "").lower() in ("1", "true", "yes"):
-        return False
+        return False, "LYRA_LIGHT_THEME"
     saved = _saved_theme()
     if saved in ("light", "terang"):
-        return False
+        return False, "pilihan /tema terang"
     if saved in ("dark", "gelap"):
-        return True
+        return True, "pilihan /tema gelap"
+    brightness = _query_terminal_background()
+    if brightness is not None:
+        return brightness < 0.5, f"warna latar dari terminal (kecerahan {brightness:.2f})"
     colorfgbg = os.environ.get("COLORFGBG", "")
     if colorfgbg:
         try:
             background = int(colorfgbg.replace(',', ';').split(';')[-1])
-            return not (background == 7 or 9 <= background <= 15)
+            return not (background == 7 or 9 <= background <= 15), f"COLORFGBG={colorfgbg}"
         except ValueError:
             pass
-    brightness = _query_terminal_background()
-    if brightness is not None:
-        return brightness < 0.5
-    return True  # default: dark background
+    return True, "bawaan (terminal tidak memberi tahu warna latarnya)"
 
-IS_DARK = _detect_dark_bg()
+
+def _detect_dark_bg():
+    return _detect_theme()[0]
+
+IS_DARK, THEME_REASON = _detect_theme()
 USE_COLOR = sys.stdout.isatty() and 'NO_COLOR' not in os.environ and os.environ.get('TERM') != 'dumb'
 
 # ─── ANSI Helpers ─────────────────────────────────────────────────────────────
@@ -134,6 +138,7 @@ RESET  = "\033[0m"
 BOLD   = "\033[1m"
 DIM    = "\033[2m"
 ITALIC = "\033[3m"
+ITALIC_OFF = "\033[23m"
 UNDERLINE = "\033[4m"
 STRIKE = "\033[9m"
 
@@ -148,8 +153,8 @@ if IS_DARK:
     COLOR_USER  = rgb_to_ansi(*hex_to_rgb("#A8B3CB"))   # soft blue
     COLOR_LYRA  = rgb_to_ansi(*hex_to_rgb("#B6A0DC"))   # vivid pink-purple
     COLOR_BORDER= rgb_to_ansi(*hex_to_rgb("#626271"))   # lavender
-    COLOR_DIM   = rgb_to_ansi(*hex_to_rgb("#94A3B8"))   # slate-400
-    COLOR_TITLE = rgb_to_ansi(*hex_to_rgb("#F8FAFC"))   # near-white
+    COLOR_DIM   = rgb_to_ansi(*hex_to_rgb("#7A8799"))   # abu-abu menengah: terbaca di latar gelap maupun terang
+    COLOR_TITLE = "\033[39m"                            # warna teks bawaan terminal: selalu kontras dengan latarnya
     COLOR_ACCENT= rgb_to_ansi(*hex_to_rgb("#34D399"))   # emerald
 else:
     # Light background — pakai warna gelap supaya kontras
@@ -161,14 +166,14 @@ else:
     COLOR_USER  = rgb_to_ansi(*hex_to_rgb("#1D4ED8"))   # dark blue
     COLOR_LYRA  = rgb_to_ansi(*hex_to_rgb("#7C3AED"))   # dark purple
     COLOR_BORDER= rgb_to_ansi(*hex_to_rgb("#6D28D9"))   # violet
-    COLOR_DIM   = rgb_to_ansi(*hex_to_rgb("#475569"))   # slate-600
-    COLOR_TITLE = rgb_to_ansi(*hex_to_rgb("#0F172A"))   # near-black
+    COLOR_DIM   = rgb_to_ansi(*hex_to_rgb("#6B7788"))   # abu-abu menengah, sedikit lebih gelap untuk latar terang
+    COLOR_TITLE = "\033[39m"                            # warna teks bawaan terminal: selalu kontras dengan latarnya
     COLOR_ACCENT= rgb_to_ansi(*hex_to_rgb("#065F46"))   # dark emerald
 
 # Respect redirected output and explicit plain-text mode.
 if not sys.stdout.isatty() or 'NO_COLOR' in os.environ or os.environ.get('TERM') == 'dumb':
     for _name in ('RESET', 'BOLD', 'DIM', 'ITALIC', 'WHITE', 'GREEN', 'RED', 'YELLOW', 'CYAN',
-                  'UNDERLINE', 'STRIKE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
+                  'ITALIC_OFF', 'UNDERLINE', 'STRIKE', 'COLOR_USER', 'COLOR_LYRA', 'COLOR_BORDER', 'COLOR_DIM', 'COLOR_TITLE', 'COLOR_ACCENT'):
         globals()[_name] = ''
 
 # ─── Mascot ───────────────────────────────────────────────────────────────────
@@ -528,9 +533,9 @@ def format_inline_markdown(text):
     # Strikethrough: ~~text~~
     text = re.sub(r'~~([^~]+)~~', rf"{STRIKE}\1{RESET}", text)
     # Bold: **bold**
-    text = re.sub(r'\*\*([^*]+)\*\*', rf"{BOLD}{WHITE}\1{RESET}", text)
-    # Italic: *italic* or _italic_
-    text = re.sub(r'\*([^*]+)\*', rf"{ITALIC}\1{RESET}", text)
+    # (isi boleh memuat *miring* bertingkat, mis. **tebal *miring***; penutupnya tidak boleh diikuti bintang lagi)
+    text = re.sub(r'\*\*(.+?)\*\*(?!\*)', rf"{BOLD}{WHITE}\1{RESET}", text)
+    text = re.sub(r'(?<![\w*])\*(?=\S)([^*]+?)(?<=\S)\*(?![\w*])', rf"{ITALIC}\1{ITALIC_OFF}", text)
     text = re.sub(r'_([^_]+)_', rf"{ITALIC}\1{RESET}", text)
     return re.sub(r'\x00(\d+)\x00', lambda m: protected[int(m.group(1))], text)
 
