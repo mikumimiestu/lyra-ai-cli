@@ -3,7 +3,7 @@
 [![CI](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/mikumimiestu/lyra-ai-cli/actions/workflows/ci.yml)
 
 ```text
-  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.19
+  [kepala kucing Nexara, pixel art]    Lyra CLI  v2.12.20
                                Mau ngerjain apa hari ini?
                                Orpheus 6 · medium · ~/projects/amagi-cli
                                / perintah · @ file · /help
@@ -29,6 +29,11 @@
 - **Kuota token per tier:** jendela 5 jam (dimulai saat pesan pertama, lalu menunggu sampai genap 5 jam kalau habis) dan batas mingguan. Free 50K, Student 100K, Pro 300K, Plus 600K, Ultra 1,2M, Ultimate 2,5M token per 5 jam; batas mingguannya 9x angka itu. Semua tier bisa memakai semua model yang ada di CLI.
 - **Perintah baru:** `/login`, `/logout`, dan `/kuota` (sisa token dan waktu reset). `/status` menampilkan cara masuk yang aktif.
 - **Kelola perangkat:** buka halaman `/cli-login` di akun AstByte untuk melihat kuota, daftar perangkat, dan mencabut akses.
+
+### Baru di v2.12.20 — Buat gambar dengan Lyra Image 5 Flash
+
+- **Gambar dari teks:** minta Lyra ("buatkan logo kedai kopi, simpan di assets/") atau pakai `/gambar [--rasio 1:1|16:9|9:16|auto] deskripsi`. Setiap pembuatan **selalu minta izin** (juga di mode AUTO SEMUA) dengan sisa jatah atau harga, dan hasilnya disimpan ke folder kerja tanpa menimpa file yang ada.
+- **Login akun** memakai jatah gambar harian paket (sama dengan di chat: Pro 3, Plus 5, Ultra 10, Ultimate 20; Free dan Student belum bisa) tanpa memotong saldo developer. **API key** dipotong $0,07 per gambar dari saldo developer. Membutuhkan server AstByte versi terbaru. Model ini belum bisa mengedit foto.
 
 ### Baru di v2.12.19 — Proses latar belakang
 

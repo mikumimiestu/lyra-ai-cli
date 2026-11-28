@@ -876,6 +876,7 @@ COMMANDS = [
     ('/reasoning', 'Atur penalaran low / medium'),
     ('/tema', 'Pilih tema terang, gelap, atau otomatis'),
     ('/proses', 'Lihat atau hentikan proses latar belakang'),
+    ('/gambar', 'Buat gambar dengan Lyra Image 5 Flash'),
     ('/memory', 'Lihat dan kelola catatan'),
     ('/time', 'Lihat waktu komputer'),
     ('/reminder', 'Kelola pengingat desktop'),
@@ -920,6 +921,8 @@ COMMAND_DETAILS = {
                  'examples': ['/details'], 'notes': ['Riwayat aktivitas maksimal 20, hanya di memori.']},
     '/model': {'usage': '/model', 'desc': 'Membuka menu model Lyra. Pilihan disimpan sebagai default untuk sesi berikutnya. Model yang mendukung penalaran lanjut ke pilihan tingkat penalaran.',
                'examples': ['/model'], 'notes': ['Gerakkan dengan ↑ ↓, Enter memilih, angka langsung memilih, Esc membatalkan.']},
+    '/gambar': {'usage': '/gambar [--rasio 1:1|16:9|9:16|auto] deskripsi', 'desc': 'Membuat satu gambar dari teks dengan Lyra Image 5 Flash dan menyimpannya di folder kerja. Selalu minta izin dan menampilkan sisa jatah atau harganya.',
+                'aliases': ['/image'], 'examples': ['/gambar logo kedai kopi minimalis', '/gambar --rasio 16:9 banner promo'], 'notes': ['Login akun memakai jatah harian paket (Free dan Student belum bisa). API key dipotong dari saldo developer.', 'Belum bisa mengedit foto.']},
     '/proses': {'usage': '/proses [stop NAMA]', 'desc': 'Daftar proses latar belakang yang dijalankan Lyra (server dev, watcher) dan menghentikannya. Semua proses otomatis berhenti saat Lyra ditutup.',
                 'aliases': ['/ps'], 'examples': ['/proses', '/proses stop web'], 'notes': ['Log tersimpan di ~/.amagi_procs (hanya bisa dibaca penggunamu).']},
     '/tema': {'usage': '/tema [terang|gelap|otomatis]', 'desc': 'Memilih warna Lyra untuk terminal berlatar terang atau gelap. Otomatis mendeteksi latar terminal; bila salah, pilih manual. Berlaku setelah /restart.',
@@ -1449,6 +1452,7 @@ def tool_call_parts(name, arguments):
         'search': ('Cari', 'pattern'),
         'create_directory': ('Buat folder', 'dirpath'),
         'execute_command': ('Jalankan', 'command'),
+        'generate_image': ('Buat gambar', 'prompt'),
         'start_process': ('Proses latar', 'command'),
         'read_process': ('Baca log', 'name'),
         'stop_process': ('Hentikan proses', 'name'),
@@ -1980,7 +1984,7 @@ if EDITOR_AVAILABLE:
 def activity_group(name, arguments):
     if name in ('list_directory', 'read_file', 'search', 'fetch_url'):
         return 'Eksplorasi'
-    if name in ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template', 'create_directory', 'init_project'):
+    if name in ('write_file', 'edit_file', 'edit_document', 'create_document', 'fill_template', 'create_directory', 'init_project', 'generate_image'):
         return 'Perubahan'
     if name in ('start_process', 'read_process', 'stop_process', 'list_processes'):
         return 'Terminal'
